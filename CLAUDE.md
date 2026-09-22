@@ -26,6 +26,11 @@ make web      # Vite dev server on :5173, proxies /api to :8000
 make help     # everything else
 ```
 
+`backend/.env` is required and gitignored; `backend/.env.example` is the
+template. Without `ANTHROPIC_API_KEY` the conversation endpoints return a
+polite unavailable message rather than failing, so a missing key looks like a
+working app with a broken model.
+
 ## Architecture invariants
 
 Do not break these without a deliberate decision; they are the substance of the
@@ -64,6 +69,23 @@ submission.
    descriptions, only opaque busy intervals. A booking assistant has no business
    knowing who a dentist is meeting, and untrusted calendar text never enters a
    model's context.
+
+6. **The cached prompt prefix must stay byte-identical.** Providers cache by
+   prefix, so one changing character in the system prompt discards the cached
+   work for everything after it. Nothing fails when a cache misses — there is
+   no error, only a larger bill and a slower reply — so this cannot be caught
+   by running the app.
+
+   Volatile per-turn material goes through the `context` parameter on
+   `LLMProvider.complete`, which sits after the cache boundary. Never put a
+   timestamp, a request id, or anything else that varies into `system`.
+   `tests/test_agent.py` asserts the prompt is identical across two turns three
+   hours apart; do not weaken it.
+
+7. **A conversation's order is data.** Messages of one agent turn are written in
+   a single transaction and share a `now()` timestamp, so they are ordered by
+   `messages.seq`, an identity column. Ordering a transcript by `created_at`
+   gives a scrambled conversation that providers reject.
 
 ## Voice interaction contract
 
@@ -121,6 +143,15 @@ connection's return to the pool and leak the previous request's tenant.
   point `TEST_DATABASE_URL` at `clinic`; `make test` handles this.
 - When changing the engine, check the tests actually fail for the right reason —
   mutate the behaviour and confirm a test catches it.
+- **Assert the reason, not the status code.** This has caught three tests that
+  passed for the wrong reason: a retried confirmation that was saved by the
+  hold's status rather than the idempotency key, an expired OAuth state whose
+  request failed later for unrelated reasons, and a stale hold. Every one was
+  green with the feature deleted. `status_code == 400` is satisfied by any
+  failure; the message text is satisfied by one.
+- Commit messages containing shell metacharacters go through
+  `git commit -F -` and a quoted heredoc. Backticks inside `-m "..."` are
+  executed by the shell and their words vanish from the message.
 
 ## Local Postgres quirks (macOS / Homebrew)
 
@@ -142,6 +173,12 @@ one origin and no CORS configuration.
 
 Chosen for familiarity over novelty: the scarce resource is time to get the
 scheduling and security right, not time to learn a framework.
+
+The default model is `claude-opus-5`. `claude-sonnet-5` is roughly 2.5x cheaper
+and the switch is one environment variable. Opus is kept because the model's
+hardest job is recognising an emergency in a patient's own words, not
+scheduling — the engine does the scheduling — and that is not where to save
+$10 a month. See NOTES.md for the figures.
 
 Out of scope, by decision rather than oversight — record these in the internal
 document as the scaling path rather than silently dropping them:

@@ -186,6 +186,43 @@ Slot alignment is computed on naive local minutes before converting, because
 subtracting two aware datetimes across a transition yields elapsed absolute time
 rather than wall-clock time, which would misalign the grid on that day.
 
+### A transaction timestamp cannot order a conversation
+
+**Symptom.** A test replaying a two-turn transcript got the messages back in
+the wrong order.
+
+**Cause.** One agent turn writes the patient's line, the assistant's, and every
+tool result inside a single transaction. `now()` returns the transaction start
+time, so all of them shared a `created_at` and `ORDER BY created_at, id` fell
+through to a random UUID.
+
+**Why it matters.** A scrambled transcript hands the model tool results before
+the calls that produced them, which providers reject outright. It is not a
+display problem: the order *is* the conversation.
+
+**Fix.** `messages.seq`, a `BIGINT GENERATED ALWAYS AS IDENTITY`. Identity is
+per-insert rather than per-transaction, so it orders correctly no matter how
+many rows one turn writes. `clock_timestamp()` — used for `audit_log` — would
+have worked for ordering too, but a sequence cannot collide.
+
+### An idempotency key that was both too long and wrong
+
+**Symptom.** `value too long for type character varying(64)` on the first
+confirmation that went through the agent.
+
+**Cause.** The key was `conversation:<uuid>:<uuid>`, 86 characters against a
+64-character column. Every real booking would have failed.
+
+The shortening surfaced a second problem. Including the conversation *and* the
+hold meant a retry that created a fresh hold produced a different key, so the
+deduplication it existed for did not apply; including only the conversation
+would have merged a patient's second, deliberate appointment into their first.
+
+**Fix.** Keyed on the hold alone. Re-confirming one hold is a retry;
+confirming a second hold is a patient booking twice, and those are different
+events. HTTP clients retrying a dropped response still supply their own
+`Idempotency-Key` header, which is a separate concern at a separate layer.
+
 ### Free/busy is re-checked at confirm time
 
 This deployment queries `freeBusy` live instead of subscribing to calendar
@@ -285,6 +322,43 @@ lines. Workflow files are now validated locally before pushing:
 ruby -ryaml -e "YAML.load_file('.github/workflows/deploy.yml')"
 ```
 
+### Assert the reason, not the status code
+
+Three times now a test has passed for the wrong reason, and the shape was
+identical each time: the assertion was too coarse to distinguish the path under
+test from a different path with the same outcome.
+
+| Test | Passed because | Not because |
+|---|---|---|
+| Retried confirmation returns one appointment | the hold was already `confirmed` | the idempotency key matched |
+| Expired OAuth state is rejected | the token exchange failed for its own reasons | the state had expired |
+| Stale hold is refused | — caught by mutation before it shipped | |
+
+In each case removing the feature left the test green. The fix is the same
+every time: assert the *reason*. `response.status_code == 400` is satisfied by
+any failure; `"invalid or has expired" in response.text` is satisfied by one.
+
+This is what mutation testing is for, and it is why every behavioural change in
+this repository is followed by deliberately breaking it.
+
+### Estimating tokens by character count was 57% low
+
+The fixed prompt overhead was estimated at 1550 tokens from a
+characters-divided-by-four rule. Measured against the API it is **2437**.
+
+The direction matters: the estimate understated the waste, so it understated
+what caching was worth. Cost figures in the architecture document come from
+`usage` on real responses, never from a character count.
+
+### Backticks in a double-quoted commit message are executed
+
+`git commit -m "... the `context` parameter ..."` runs `context` as a shell
+command and substitutes its output — nothing — into the message. The commit
+succeeded with words silently missing.
+
+Commit messages with any shell metacharacter go through `git commit -F -` and a
+quoted heredoc.
+
 ### B008 is a false positive on FastAPI
 
 `ruff`'s "do not perform function call in argument defaults" fires on
@@ -309,6 +383,70 @@ increase request, which is not same-day.
 Every push creates a new Artifact Registry tag. Layers are shared, so the cost
 does not multiply by the image size, but it does grow. A cleanup policy
 retaining the most recent versions belongs here before this runs for long.
+
+---
+
+## Cost and latency
+
+### The standing prompt is resent on every call, and it is not small
+
+The API is stateless: each call carries the system prompt, all seven tool
+definitions, and the whole conversation so far. The first two are byte-identical
+every time and measure **2437 tokens**. A booking conversation makes roughly
+nine calls, so without caching that is about 22,000 tokens of repeated input.
+
+Marking it cacheable, measured on three consecutive calls:
+
+| Call | Fresh input | Cache write | Cache read |
+|---|---|---|---|
+| 1 | 109 | 2437 | 0 |
+| 2 | 112 | 0 | 2437 |
+| 3 | 115 | 0 | 2437 |
+
+For a nine-call conversation on Claude Opus 5 that is roughly $0.117 of input
+down to $0.032 — about 73% of the input cost, and 59% of the total once output
+is counted. Output is not cacheable and is the larger share at this model tier,
+which is why the headline saving is not the tenfold figure the per-token rates
+suggest.
+
+The latency matters more than the money. Cached tokens are not re-read, so the
+prefill disappears from every turn after the first. On a voice call that is the
+pause between the patient finishing their sentence and the assistant starting
+its reply.
+
+### The cache was impossible before it was enabled
+
+The current time was appended to the system prompt, so the cached prefix changed
+every minute.
+
+Nothing fails when a cache misses. There is no error, no warning, and no
+degraded behaviour — only a larger bill and a slower reply, neither of which is
+visible from inside the request. A cache that silently never works is the
+default outcome of writing this code without measuring it.
+
+Volatile per-turn material now goes through an explicit `context` parameter on
+the provider port, placed after the cache boundary, and the docstring says why.
+A test asserts the system prompt is byte-identical across two turns three hours
+apart and that the timestamp appears only in the uncached half.
+
+*Related trap, same shape:* adding that parameter, it was named `context` —
+which the existing `ToolContext` variable in the same scope then shadowed,
+sending a `ToolContext` object to the API as the prompt.
+
+### Choosing the model
+
+Default is `claude-opus-5`, at roughly $0.06 per booking conversation with
+caching. `claude-sonnet-5` is about 2.5x cheaper and switching is one
+environment variable, no redeploy of the image.
+
+Opus was kept for one reason. The model's hardest job here is not scheduling —
+the engine does that — it is recognising an emergency in a patient's own words:
+*"my back tooth aches a bit and my face feels puffy"* must escalate, not book.
+At a few hundred bookings a month the difference between the two models is
+$10-20; the cost of missing that sentence is somebody's health. That is not
+where to economise.
+
+The switch is deliberately trivial so the clinic can make the opposite call.
 
 ---
 
