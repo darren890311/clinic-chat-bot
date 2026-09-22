@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     microsoft_tenant_id: str = "common"
     oauth_redirect_base: str = "http://localhost:8000"
 
-    default_clinic_slug: str = "brightsmile"
+    default_clinic_slug: str = "darren-dental"
     hold_ttl_seconds: int = 300
     freebusy_cache_seconds: int = 60
 

@@ -51,7 +51,7 @@ onMounted(async () => {
 
 <template>
   <div class="wrap">
-    <h1>BrightSmile Dental</h1>
+    <h1>Darren Dental</h1>
     <p class="sub">Appointment availability — the chat and voice assistant book against this same engine.</p>
 
     <div class="card">

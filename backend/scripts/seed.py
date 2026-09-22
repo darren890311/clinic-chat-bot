@@ -2,7 +2,7 @@
 
 Idempotent: safe to re-run. Run after `alembic upgrade head`.
 
-    python -m scripts.seed --slug brightsmile --name "BrightSmile Dental"
+    python -m scripts.seed --slug darren-dental --name "Darren Dental"
 """
 
 from __future__ import annotations
@@ -96,8 +96,8 @@ async def seed(slug: str, name: str, timezone: str) -> uuid.UUID:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--slug", default="brightsmile")
-    parser.add_argument("--name", default="BrightSmile Dental")
+    parser.add_argument("--slug", default="darren-dental")
+    parser.add_argument("--name", default="Darren Dental")
     parser.add_argument("--timezone", default="America/New_York")
     args = parser.parse_args()
     clinic_id = asyncio.run(seed(args.slug, args.name, args.timezone))
