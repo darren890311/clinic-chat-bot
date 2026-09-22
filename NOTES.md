@@ -312,6 +312,74 @@ retaining the most recent versions belongs here before this runs for long.
 
 ---
 
+## Reading the brief
+
+Two requirements are ambiguous enough that the reading is a decision, and a
+decision is worth recording.
+
+### "Voice" means in the app, not on the phone
+
+The brief asks for "chat and voice AI" and, under In Scope, "create the working
+web app". It never mentions a phone number, telephony, SIP or PSTN.
+
+Read as in-app push-to-talk. A phone channel would need a carrier, a number and
+a telephony provider, none of which is a web app feature, and it is a large
+enough requirement that it would not be carried by two words.
+
+The agent is transport-agnostic — it holds the tools, the scope guard and the
+conversation, and knows nothing about how audio reaches it — so a phone channel
+is an additional front end rather than a rewrite. Recorded as the scaling path,
+not built.
+
+### "Updated in Outlook and Google Calendar" is read as both directions
+
+Requirement 2 is phrased as a write: the schedule "should be updated in" the
+calendars. Requirement 3 asks the bot to be "aware of the busy / available
+schedule of the professionals".
+
+If the calendars were only ever written to, our own database would already be
+the complete picture and requirement 3 would say nothing that requirement 4
+does not. Read together, the natural meaning is that a practitioner's real
+diary — the surgery they scheduled themselves, the supplier meeting, the
+afternoon off — is part of what "busy" means.
+
+Built bidirectional, for three reasons:
+
+* Writing events already requires the full OAuth flow, token storage and an API
+  client. Reading free/busy is one more endpoint on a connection that has to
+  exist anyway.
+* Bidirectional is a superset. If the brief meant write-only, nothing is lost;
+  if it meant both and we built one, a requirement is missing.
+* It demonstrates better. An interviewer can put "Lunch, 12:00" in a test
+  calendar and watch the bot decline that slot.
+
+The port deliberately cannot read event titles, attendees or descriptions, only
+opaque busy intervals. A booking assistant has no business knowing who a dentist
+is meeting, and it means no attacker-controlled calendar text ever reaches the
+model's context.
+
+*Implication for the demo:* seed the test calendars with ordinary commitments
+beforehand. With empty calendars the read path is invisible and the system looks
+write-only regardless of what it does.
+
+### Nothing is booked on speech alone
+
+Speech recognition misreads names, dates and digits, and it offers the patient
+no way to re-read what was understood. A booking has consequences — someone
+takes time off work for it.
+
+So the spoken agreement places a *hold*, and the appointment is confirmed only
+when the patient acts on a card showing service, practitioner, date and time.
+That falls out of the two-phase booking already built for a different reason:
+the hold exists because a patient needs time to decide, and it turns out to be
+exactly the window in which they read the card.
+
+The phone number is typed rather than spoken. Digits are where recognition fails
+most often and where a mistake is least recoverable: a wrong number is a patient
+nobody can reach.
+
+---
+
 ## Still open
 
 - The four API-key secrets hold placeholder values and must be filled before the

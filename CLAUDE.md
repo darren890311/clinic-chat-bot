@@ -48,6 +48,48 @@ submission.
    backends sit behind ports. Adding a calendar system means one class satisfying
    `CalendarProvider`; nothing in the engine, agent or API changes.
 
+4. **Nothing is booked on speech alone.** Speech recognition misreads names,
+   dates and digits, and a booking has consequences. The agent may place a hold
+   from a spoken agreement, but the appointment is only confirmed when the
+   patient acts on a confirmation card they can read. See the voice contract
+   below.
+
+5. **External calendars are read as well as written.** Free/busy is pulled into
+   the engine so the bot respects commitments it did not create; confirmed
+   appointments are pushed back out as events. Our database remains the single
+   source of truth for appointments — the calendars are a busy source and a
+   mirror, not a peer.
+
+   The `CalendarProvider` port exposes no way to read event titles, attendees or
+   descriptions, only opaque busy intervals. A booking assistant has no business
+   knowing who a dentist is meeting, and untrusted calendar text never enters a
+   model's context.
+
+## Voice interaction contract
+
+Voice is **in-app push-to-talk**, not telephony. The brief asks for a working
+web app and never mentions phone numbers; the agent is transport-agnostic, so
+adding SIP later is a new channel rather than a rewrite.
+
+Every voice turn must also be visible, because speech is lossy and cannot be
+re-read:
+
+- **Show what was heard.** The recognised text appears on screen so a patient
+  catches a misreading immediately, rather than after it has been acted on.
+- **Speak and show the reply.** Audio plus text, always both.
+- **Let the patient stop the audio mid-sentence.** Listening to eight offered
+  times when the second one was right is the fastest way to lose someone. This
+  is distinct from mute, which is a session-level preference.
+- **Confirm on a card, not by voice.** Before anything is booked, show service,
+  practitioner, date and time, and require an explicit action. This maps onto
+  the two-phase booking already implemented: spoken agreement creates the hold,
+  the card confirms it.
+- **Show the hold counting down.** The TTL is real; make it visible so the
+  patient knows the slot is theirs and that it will not wait forever.
+- **Type the phone number.** Digits are where recognition fails most and where
+  a mistake is least recoverable — a wrong number means a patient who cannot be
+  reached. The name is editable on the confirmation card for the same reason.
+
 ## Row level security: the trap
 
 RLS policies are **silently inert** for superusers and for roles with
