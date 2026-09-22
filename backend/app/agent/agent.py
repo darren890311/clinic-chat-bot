@@ -122,9 +122,10 @@ class Agent:
             )
 
         system = await self._system_prompt(session, clinic_id, now=now)
+        turn_context = await self._context(session, clinic_id, now=now)
         transcript = await self._transcript(session, conversation_id=conversation.id)
 
-        context = agent_tools.ToolContext(
+        tool_context = agent_tools.ToolContext(
             session=session,
             clinic_id=clinic_id,
             conversation_id=conversation.id,
@@ -142,6 +143,7 @@ class Agent:
                     messages=transcript,
                     tools=agent_tools.DEFINITIONS,
                     max_tokens=1024,
+                    context=turn_context,
                 )
             except LLMError as exc:
                 logger.warning(
@@ -206,7 +208,7 @@ class Agent:
 
             for call in completion.tool_calls:
                 used.append(call.name)
-                result = await self._run_tool(call, context)
+                result = await self._run_tool(call, tool_context)
                 transcript.append(Message(role="tool", content=result, tool_call_id=call.id))
                 await repo.append_message(
                     session,
@@ -292,17 +294,21 @@ class Agent:
             (s.practitioner.slug, s.practitioner.name, sorted(s.practitioner.service_codes))
             for s in schedules
         ]
-        prompt = build_system_prompt(
+        # Deliberately contains nothing that changes between turns. The
+        # current time is passed separately as context, because a timestamp
+        # here would change the cached prefix every minute and the only symptom
+        # would be a larger bill.
+        return build_system_prompt(
             clinic_name=clinic.name if clinic else "the practice",
             contact_phone=clinic.contact_phone if clinic else None,
             services=services,
             practitioners=practitioners,
         )
-        # Appended last so the cacheable part of the prompt stays byte-identical
-        # between turns; a timestamp near the front would invalidate it.
+
+    async def _context(self, session: AsyncSession, clinic_id: uuid.UUID, *, now: datetime) -> str:
+        """Per-turn facts the model needs but must not cache."""
         local = now.astimezone((await repo.load_policy(session, clinic_id)).tz)
-        stamp = f"{local:%A %d %B %Y, %-I:%M %p}"
-        return f"{prompt}\nThe current date and time at the practice is {stamp}."
+        return f"The current date and time at the practice is {local:%A %d %B %Y, %-I:%M %p}."
 
     async def _transcript(
         self, session: AsyncSession, *, conversation_id: uuid.UUID

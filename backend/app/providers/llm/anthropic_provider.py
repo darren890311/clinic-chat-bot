@@ -131,13 +131,28 @@ class AnthropicProvider:
         messages: list[Message],
         tools: list[ToolDefinition],
         max_tokens: int = 1024,
+        context: str | None = None,
     ) -> Completion:
         client = self._ensure_client()
+
+        # Requests render as tools -> system -> messages, so a single
+        # breakpoint at the end of the stable system block caches both the tool
+        # definitions and the standing instructions. Volatile context goes in a
+        # second block after it, where changing it costs nothing.
+        system_blocks: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": system,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        if context:
+            system_blocks.append({"type": "text", "text": context})
 
         request: dict[str, Any] = {
             "model": self.model,
             "max_tokens": max_tokens,
-            "system": system,
+            "system": system_blocks,
             "messages": self._messages(messages),
             # Booking is a short, latency-sensitive exchange with a patient
             # waiting. Low effort is the right trade here; the hard reasoning
@@ -193,6 +208,8 @@ class AnthropicProvider:
             usage=Usage(
                 input_tokens=getattr(usage, "input_tokens", 0) or 0,
                 output_tokens=getattr(usage, "output_tokens", 0) or 0,
+                cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
+                cache_write_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
             ),
             refusal_reason=refusal,
         )

@@ -65,12 +65,20 @@ class ScriptedProvider:
         self.seen_tools: list[str] = []
         self.seen_system: str = ""
         self.seen_transcripts: list[list[Any]] = []
+        # Every system prompt and context it was handed, in order, so a test
+        # can check the cached half really is stable.
+        self.systems: list[str] = []
+        self.contexts: list[str | None] = []
 
-    async def complete(self, *, system, messages, tools, max_tokens=1024) -> Completion:
+    async def complete(
+        self, *, system, messages, tools, max_tokens=1024, context=None
+    ) -> Completion:
         self.calls += 1
         self.seen_system = system
         self.seen_tools = [t.name for t in tools]
         self.seen_transcripts.append(list(messages))
+        self.systems.append(system)
+        self.contexts.append(context)
         if not self.script:
             return Completion(text="Anything else?")
         step = self.script.pop(0)
@@ -458,3 +466,39 @@ async def test_swapping_the_provider_changes_nothing_about_the_booking(session) 
     assert first[2] - first[1] == timedelta(
         minutes=150
     )  # the service duration, not the model's idea
+
+
+# --- prompt caching ----------------------------------------------------------
+
+
+async def test_the_cached_prefix_is_byte_identical_between_turns(session) -> None:
+    """The guard on prompt caching.
+
+    Providers cache by prefix. One changing character in the system prompt —
+    a timestamp, a request id, a reordered dict — discards the cached work for
+    everything after it, and the only symptom is a larger bill and a slower
+    reply. Nothing fails, so nothing tells you.
+
+    The current time is therefore passed as `context`, which sits after the
+    cache boundary. This test is what stops it drifting back into `system`.
+    """
+    provider = ScriptedProvider([says("Hello"), says("Hello again")])
+    agent = Agent(provider)
+
+    first = await agent.respond(session, CLINIC, text="Hi", now=NOW)
+    await agent.respond(
+        session,
+        CLINIC,
+        text="Still there?",
+        conversation_id=first.conversation_id,
+        now=NOW + timedelta(hours=3, minutes=17),
+    )
+
+    assert provider.systems[0] == provider.systems[1], (
+        "the system prompt changed between turns; the cached prefix is discarded"
+    )
+    # The time did move, and it moved in the part that is not cached.
+    assert provider.contexts[0] != provider.contexts[1]
+    assert "current date and time" in provider.contexts[0]
+    # And it is nowhere in the cached half.
+    assert "current date and time" not in provider.systems[0]

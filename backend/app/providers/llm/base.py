@@ -83,11 +83,18 @@ class Message:
 class Usage:
     input_tokens: int = 0
     output_tokens: int = 0
+    # Reported so a cache that has silently stopped working is visible rather
+    # than merely expensive. A run of turns with cache_read at zero means
+    # something is varying in the prefix.
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
     def __add__(self, other: Usage) -> Usage:
         return Usage(
             input_tokens=self.input_tokens + other.input_tokens,
             output_tokens=self.output_tokens + other.output_tokens,
+            cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
+            cache_write_tokens=self.cache_write_tokens + other.cache_write_tokens,
         )
 
 
@@ -131,8 +138,21 @@ class LLMProvider(Protocol):
         messages: list[Message],
         tools: list[ToolDefinition],
         max_tokens: int = 1024,
+        context: str | None = None,
     ) -> Completion:
-        """One turn. The caller owns the loop, the tools and the transcript."""
+        """One turn. The caller owns the loop, the tools and the transcript.
+
+        `system` must be byte-identical between turns. Providers cache by
+        prefix, so a single changing character anywhere in it — a timestamp, a
+        request id — discards the cached work for everything after it.
+
+        `context` is for exactly that changing material. It is placed after the
+        cache boundary, so the standing instructions and the tool definitions
+        stay cached while the current time does not. Putting volatile text in
+        `system` instead costs a full re-read on every call and reports no
+        error, which is why the split is in the signature rather than in a
+        comment.
+        """
         ...
 
 

@@ -72,8 +72,15 @@ class OpenAIProvider:
             for tool in tools
         ]
 
-    def _messages(self, system: str, messages: list[Message]) -> list[dict[str, Any]]:
-        out: list[dict[str, Any]] = [{"role": "system", "content": system}]
+    def _messages(
+        self, system: str, messages: list[Message], context: str | None = None
+    ) -> list[dict[str, Any]]:
+        # OpenAI caches automatically on the longest matching token prefix, so
+        # there is no marker to place — only an order to respect. The stable
+        # instructions come first and the volatile context is appended, leaving
+        # everything before it a common prefix across turns.
+        content = f"{system}\n\n{context}" if context else system
+        out: list[dict[str, Any]] = [{"role": "system", "content": content}]
 
         for message in messages:
             if message.role == "tool":
@@ -121,13 +128,14 @@ class OpenAIProvider:
         messages: list[Message],
         tools: list[ToolDefinition],
         max_tokens: int = 1024,
+        context: str | None = None,
     ) -> Completion:
         client = self._ensure_client()
 
         request: dict[str, Any] = {
             "model": self.model,
             "max_completion_tokens": max_tokens,
-            "messages": self._messages(system, messages),
+            "messages": self._messages(system, messages, context),
         }
         if tools:
             request["tools"] = self._tools(tools)
@@ -165,6 +173,10 @@ class OpenAIProvider:
             usage=Usage(
                 input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
                 output_tokens=getattr(usage, "completion_tokens", 0) or 0,
+                cache_read_tokens=getattr(
+                    getattr(usage, "prompt_tokens_details", None), "cached_tokens", 0
+                )
+                or 0,
             ),
             refusal_reason=refusal,
         )
