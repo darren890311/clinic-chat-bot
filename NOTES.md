@@ -601,6 +601,42 @@ spent a model call to say something the server already knew, and still left the
 model guessing. State the system owns belongs in the context, not in a fake
 turn.
 
+### Silence does not override the transcript
+
+After booking moved to the card, the assistant kept insisting the appointment
+was not made. The per-turn context said plainly that it was:
+
+> *This patient has already completed the form and these appointments are
+> booked: Routine Cleaning on Wednesday 23 September at 10:00 AM.*
+
+The model read that and still answered *"Not yet — the hold isn't a booking
+until you submit the form"*, then offered to cancel the booking it had just
+made, as a duplicate of itself.
+
+Two things were competing with the context, and both were louder.
+
+**The system prompt.** It said, emphatically and in the cached prefix, that a
+hold is not a booking and that "yes, book it" means pointing the patient back
+at the form. It never acknowledged that the form does eventually get submitted.
+The prompt now says what happens next, and that the held slot *becomes* that
+appointment rather than sitting beside it.
+
+**The assistant's own earlier words.** The transcript still contained its
+`hold_slot` result — *"Held. Reserved for about 5 minutes — ask them to
+confirm."* That sentence stays in the conversation forever, and omitting the
+hold from the context did nothing to contradict it. The context now states the
+absence outright:
+
+> *No slot is currently held, and no confirmation form is on the patient's
+> screen. Any hold you placed earlier has either become one of the booked
+> appointments above or expired.*
+
+The general point is worth more than the fix. **A model reasons over
+everything in front of it, and stale text does not stop being text.** Removing
+a fact from the context does not remove it from the conversation; only a newer,
+explicit statement does. Where state can change behind the model's back, say
+what the state *is* on every turn — including when it is nothing.
+
 ### A guardrail in the prompt is not a guardrail
 
 The voice contract says nothing is booked without the patient acting on a

@@ -554,3 +554,59 @@ async def test_the_times_offered_are_clinic_local_with_no_offset(session) -> Non
     assert "no timezone offset" in result.content
     assert "+00:00" not in result.content
     assert "Z\n" not in result.content
+
+
+async def test_the_context_states_plainly_that_nothing_is_held(session) -> None:
+    """An explicit negative, because silence loses to the transcript.
+
+    The assistant's own earlier tool result says "Held — ask them to confirm",
+    and that sentence stays in the conversation forever. Omitting the hold from
+    the context did not override it: the model kept describing a reservation
+    that no longer existed and offered to cancel the booking it had just made
+    as a duplicate of itself.
+    """
+    provider = ScriptedProvider([says("ok")])
+    await Agent(provider).respond(session, CLINIC, text="Hello", now=NOW)
+
+    context = provider.contexts[0]
+    assert "No slot is currently held" in context
+    assert "no confirmation form is on the" in context
+
+
+async def test_a_completed_booking_is_reported_as_settled(session) -> None:
+    """The assistant cannot see the card, so the server has to tell it."""
+    from app.db import repository as repo
+    from app.services import booking
+
+    conversation = await repo.get_or_create_conversation(
+        session,
+        CLINIC,
+        conversation_id=None,
+        channel="chat",
+        llm_provider="scripted",
+        llm_model="script-1",
+    )
+    hold = await booking.create_hold(
+        session,
+        CLINIC,
+        service_code="A",
+        practitioner_slug="dr-hale",
+        starts_at=monday(9),
+        conversation_id=conversation.id,
+        now=NOW,
+    )
+    await booking.confirm_appointment(
+        session,
+        CLINIC,
+        hold_id=hold.id,
+        patient=booking.PatientDetails(full_name="Alex Tran", phone="+886912345678"),
+        now=NOW,
+    )
+
+    provider = ScriptedProvider([says("ok")])
+    await Agent(provider).respond(
+        session, CLINIC, text="Is that sorted?", conversation_id=conversation.id, now=NOW
+    )
+    context = provider.contexts[0]
+    assert "already completed the form" in context
+    assert "Do not ask them to fill in the form again" in context

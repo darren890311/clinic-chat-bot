@@ -331,11 +331,21 @@ class Agent:
 
         services = await repo.load_services(session, clinic_id)
 
+        practitioners = {
+            s.practitioner.slug: s.practitioner.name
+            for s in await repo.load_schedules(
+                session, clinic_id, window=Interval(now, now + timedelta(days=1))
+            )
+        }
+        slugs = await repo.practitioner_slugs_by_id(session, clinic_id)
+
         def describe(appointment) -> str:
             service = services.get(appointment.service_code)
             name = service.name if service else appointment.service_code
+            who = practitioners.get(slugs.get(appointment.practitioner_id, ""), "")
             when = appointment.starts_at.astimezone(policy.tz)
-            return f"{name} on {when:%A %d %B at %-I:%M %p}"
+            with_who = f" with {who}" if who else ""
+            return f"{name}{with_who} on {when:%A %d %B at %-I:%M %p}"
 
         confirmed = await repo.confirmed_for_conversation(session, conversation_id=conversation_id)
         if confirmed:
@@ -355,6 +365,16 @@ class Agent:
                 f"A slot is held and showing on the patient's screen as a confirmation "
                 f"form: {describe(hold)}, for about {minutes} more minutes. It is not "
                 f"booked until they submit that form."
+            )
+        else:
+            # Stated rather than omitted. The transcript still contains the
+            # assistant's own earlier "held, ask them to confirm", and silence
+            # does not override a sentence the model can still read. An
+            # explicit negative does.
+            lines.append(
+                "No slot is currently held, and no confirmation form is on the "
+                "patient's screen. Any hold you placed earlier has either become "
+                "one of the booked appointments above or expired."
             )
 
         return "\n".join(lines)
