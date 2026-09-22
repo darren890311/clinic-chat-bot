@@ -601,6 +601,39 @@ spent a model call to say something the server already knew, and still left the
 model guessing. State the system owns belongs in the context, not in a fake
 turn.
 
+### Caution that refused the job
+
+The first version of the urgent-symptoms rule listed "severe pain" as an
+emergency. A patient who said *"my tooth hurts"* and then *"pain severe"* was
+told to ring the practice, go to an emergency department if they could not, and
+the conversation was locked so they could not book.
+
+Severe toothache is the single most common reason a person contacts a dentist.
+The assistant was refusing its own job at exactly the moment it was most
+needed, and a practice that sent every toothache to A&E would not be a practice
+for long.
+
+The mistake was conflating **urgent** with **beyond this system**. Severe pain
+is urgent — it wants the earliest appointment there is — and it is ordinary
+dental work. The rule is now three ordered tiers with no overlap:
+
+| | Example | Response |
+|---|---|---|
+| Hospital | swelling spreading to eye or neck, bleeding that will not stop, difficulty breathing or swallowing, blow to the head | stop, call now, escalate |
+| Dentist, immediately | knocked-out adult tooth | ring the practice **and** book the earliest slot |
+| Dentist, soon | severe pain, broken tooth, lost filling, localised swelling | search from today, offer the earliest |
+
+The knocked-out tooth is the case that shows the shape of the error. The
+routing question originally asked whether the injury followed an accident,
+which swept up every sports knock and escalated it away from the one place that
+could treat it — while re-implantation is measured in minutes.
+
+There is a general lesson underneath. **Safety rules written without the
+domain in front of you default to caution, and caution that refuses the task is
+not safe, it is useless.** The list read like a first-aid leaflet rather than
+something a dental receptionist would recognise, and it took using the product
+to notice.
+
 ### Silence does not override the transcript
 
 After booking moved to the card, the assistant kept insisting the appointment

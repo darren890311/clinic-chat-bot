@@ -610,3 +610,48 @@ async def test_a_completed_booking_is_reported_as_settled(session) -> None:
     context = provider.contexts[0]
     assert "already completed the form" in context
     assert "Do not ask them to fill in the form again" in context
+
+
+async def test_the_brief_sends_ordinary_pain_to_a_booking_not_a_hospital(session) -> None:
+    """The single most common reason to ring a dentist must not be refused.
+
+    An earlier version listed "severe pain" as an emergency, so a patient who
+    said their tooth hurt badly was told to go to an emergency department and
+    the conversation was locked. That is wrong twice over: it is what the
+    practice exists to treat, and it makes the assistant useless at its own
+    job.
+    """
+    provider = ScriptedProvider([says("ok")])
+    await Agent(provider).respond(session, CLINIC, text="My tooth hurts", now=NOW)
+
+    prompt = provider.seen_system
+    assert "Severe pain" in prompt and "ordinary dental work" in prompt
+    assert "search from today rather than next week" in prompt
+
+
+async def test_a_knocked_out_tooth_is_not_sent_to_a_hospital(session) -> None:
+    """Re-implantation is time-critical and it is dental work, not A&E work.
+
+    The routing question originally asked whether the injury followed an
+    accident, which swept up every sports knock and escalated it away from the
+    one place that could treat it.
+    """
+    provider = ScriptedProvider([says("ok")])
+    await Agent(provider).respond(session, CLINIC, text="I lost a tooth", now=NOW)
+
+    prompt = provider.seen_system
+    assert "knocked-out or pushed-out adult tooth" in prompt
+    assert "belongs at the dentist, not at a hospital" in prompt
+    assert "do not escalate instead of booking" in prompt
+
+
+async def test_the_hospital_criteria_stay_narrow(session) -> None:
+    """What genuinely needs a hospital, and nothing wider."""
+    provider = ScriptedProvider([says("ok")])
+    await Agent(provider).respond(session, CLINIC, text="Hello", now=NOW)
+
+    prompt = provider.seen_system
+    for sign in ("spreading towards your eye or neck", "bleeding that will", "blow to the head"):
+        assert sign in prompt
+    # The phrase that used to catch every sports injury.
+    assert "injury after an accident" not in prompt
