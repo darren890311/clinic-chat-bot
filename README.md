@@ -94,6 +94,9 @@ docs/              internal and external documentation
 
 ## Documentation
 
+- [`NOTES.md`](NOTES.md) — problems hit while building this and what was done
+  about them, including why the application does not connect as the database
+  role the provider hands you.
 - `docs/internal.md` — architecture, cost of building and running in production,
   decisions made along the way, security features.
 - `docs/external.md` — what the product does, and how to install and use it,
