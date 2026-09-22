@@ -4,11 +4,10 @@ name: Deploy
 # the failure mode we are avoiding is discovering a deployment problem on the
 # afternoon of the deadline, on top of everything else.
 
+# Manual trigger only. The pipeline is defined and reviewable, but it needs a
+# GCP project and its secrets to run, so it does not fire on push and cannot
+# fail a commit. Switch to `workflow_run` after the project is provisioned.
 on:
-  workflow_run:
-    workflows: [CI]
-    branches: [main]
-    types: [completed]
   workflow_dispatch:
 
 env:
@@ -17,7 +16,6 @@ env:
 
 jobs:
   deploy:
-    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -53,19 +51,20 @@ jobs:
 
       - name: Deploy
         run: |
+          SECRETS="DATABASE_URL=database-url:latest"
+          SECRETS="$SECRETS,TOKEN_ENCRYPTION_KEY=token-encryption-key:latest"
+          SECRETS="$SECRETS,ANTHROPIC_API_KEY=anthropic-api-key:latest"
+          SECRETS="$SECRETS,OPENAI_API_KEY=openai-api-key:latest"
+          SECRETS="$SECRETS,GOOGLE_CLIENT_SECRET=google-client-secret:latest"
+          SECRETS="$SECRETS,MICROSOFT_CLIENT_SECRET=microsoft-client-secret:latest"
+
           gcloud run deploy ${SERVICE} \
             --image "$IMAGE" --region "$REGION" --quiet \
             --allow-unauthenticated \
             --min-instances 0 --max-instances 4 \
             --cpu 1 --memory 512Mi --concurrency 40 --timeout 120 \
             --set-env-vars ENVIRONMENT=production \
-            --set-secrets \
-DATABASE_URL=database-url:latest,\
-TOKEN_ENCRYPTION_KEY=token-encryption-key:latest,\
-ANTHROPIC_API_KEY=anthropic-api-key:latest,\
-OPENAI_API_KEY=openai-api-key:latest,\
-GOOGLE_CLIENT_SECRET=google-client-secret:latest,\
-MICROSOFT_CLIENT_SECRET=microsoft-client-secret:latest
+            --set-secrets "$SECRETS"
 
       - name: Smoke test the new revision
         run: |
