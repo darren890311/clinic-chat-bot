@@ -433,6 +433,50 @@ apart and that the timestamp appears only in the uncached half.
 which the existing `ToolContext` variable in the same scope then shadowed,
 sending a `ToolContext` object to the API as the prompt.
 
+### What a month costs, and where the volume number comes from
+
+A per-conversation figure is only useful with a volume to multiply it by, and a
+volume figure is only useful if it can be defended. This one is derived from the
+clinic's own configuration rather than assumed.
+
+**Capacity, from the working hours in the seed data.** Mon-Fri 09:00-18:00 plus
+Sat 09:00-13:00 is 49 hours a week per practitioner, 147 across the three. With
+the 15-minute turnaround, a one-hour treatment occupies 75 minutes, so one
+practitioner fits 39 a week and the practice fits 117 — about **507 a month at
+full occupancy**.
+
+That ceiling is generous on purpose: it assumes every appointment is the
+shortest treatment offered. A Full Mouth Restoration occupies 375 minutes, and
+a week of those is 14 appointments for the whole practice. A realistic mix sits
+well below 507.
+
+**Utilisation is an assumption, and is stated as one.** No dental practice runs
+at full occupancy. Rather than pick a number and defend it, the cost is a curve:
+
+| Occupancy | Bookings/month | LLM cost/month |
+|---|---|---|
+| 40% | 203 | $12 |
+| 55% | 279 | $17 |
+| 70% | 355 | $21 |
+| 85% | 431 | $26 |
+
+At $0.06 per conversation on Claude Opus 5 with caching, the model is between
+**$12 and $26 a month** across the plausible range. Switching to Claude Sonnet 5
+roughly halves it.
+
+**What this figure does not include.** Infrastructure — Cloud Run at
+`min-instances 0`, Neon's free tier, Artifact Registry, seven secrets — measures
+under $1 a month at this scale. Speech recognition and synthesis are not built
+yet and will be charged per minute of audio, not per conversation; that is the
+line item most likely to exceed the model itself once voice ships.
+
+**And the unit is wrong in a way worth saying aloud.** The table counts
+*bookings*, but the bill is per *conversation*. A patient who asks about opening
+hours, cancels an appointment, or abandons halfway still costs a conversation
+and produces no booking. Conversations therefore exceed bookings by some factor
+this system cannot know until it has run for a month — which is why the
+`conversations` table records provider, model and channel from the first day.
+
 ### Choosing the model
 
 Default is `claude-opus-5`, at roughly $0.06 per booking conversation with
