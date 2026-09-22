@@ -18,9 +18,11 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     String,
@@ -202,10 +204,18 @@ class Conversation(Base):
 
 
 class Message(Base):
+    """One turn of a conversation.
+
+    Ordered by `seq`, not by `created_at`. A whole agent turn is written in one
+    transaction, so every row in it shares a transaction timestamp; the identity
+    column is what actually preserves the order the conversation happened in.
+    """
+
     __tablename__ = "messages"
-    __table_args__ = (Index("ix_messages_conversation", "conversation_id", "created_at"),)
+    __table_args__ = (Index("ix_messages_order", "conversation_id", "seq"),)
 
     id: Mapped[uuid.UUID] = _pk()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), nullable=False)
     clinic_id: Mapped[uuid.UUID] = _clinic_fk()
     conversation_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False

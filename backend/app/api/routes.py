@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.agent import Agent
 from app.config import get_settings
 from app.db import repository as repo
 from app.db.session import tenant_session, unscoped_session
@@ -13,6 +14,7 @@ from app.domain import errors
 from app.domain.intervals import Interval
 from app.domain.scheduling import compute_availability
 from app.providers.calendar import CalendarError, registered_providers
+from app.providers.llm import registered_providers as llm_providers
 from app.services import booking
 
 router = APIRouter(prefix="/api")
@@ -58,6 +60,7 @@ async def health() -> dict[str, object]:
         "environment": settings.environment,
         "llm_provider": settings.llm_provider,
         "llm_model": settings.llm_model,
+        "llm_providers": llm_providers(),
         "calendar_providers": registered_providers(),
     }
 
@@ -297,3 +300,61 @@ async def cancel_appointment(
             raise _booking_http_error(exc) from exc
 
         return await _appointment_out(session, appointment)
+
+
+# --- conversation ----------------------------------------------------------
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    conversation_id: uuid.UUID | None = None
+    channel: str = Field(default="chat", pattern="^(chat|voice)$")
+
+
+class ChatReply(BaseModel):
+    conversation_id: uuid.UUID
+    reply: str
+    escalated: bool = False
+    escalation_reason: str | None = None
+    tools_used: list[str] = Field(default_factory=list)
+    provider: str
+    model: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+@router.post("/chat", response_model=ChatReply)
+async def chat(
+    body: ChatRequest,
+    clinic_id: uuid.UUID = Depends(current_clinic_id),
+) -> ChatReply:
+    """One turn of conversation.
+
+    The whole turn runs inside a single tenant-scoped transaction, so a booking
+    made mid-conversation and the transcript recording it either both land or
+    neither does.
+
+    `provider` and `model` are returned deliberately: being able to watch them
+    change while the behaviour does not is the point of the abstraction.
+    """
+    agent = Agent()
+    async with tenant_session(clinic_id) as session:
+        reply = await agent.respond(
+            session,
+            clinic_id,
+            text=body.message,
+            conversation_id=body.conversation_id,
+            channel=body.channel,
+        )
+
+    return ChatReply(
+        conversation_id=reply.conversation_id,
+        reply=reply.text,
+        escalated=reply.escalated,
+        escalation_reason=reply.escalation_reason,
+        tools_used=reply.tools_used,
+        provider=reply.provider,
+        model=reply.model,
+        input_tokens=reply.usage.input_tokens,
+        output_tokens=reply.usage.output_tokens,
+    )

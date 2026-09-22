@@ -16,11 +16,18 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://clinic_app:devpass@127.0.0.1:55432/clinic"
     migration_database_url: str = "postgresql+psycopg://postgres@127.0.0.1:55432/clinic"
 
-    # Model selection is a deployment decision, not a code change.
+    # Model selection is a deployment decision, not a code change. Switching
+    # LLM_PROVIDER changes the vendor; the tools, prompt and guardrails are
+    # identical either way.
     llm_provider: str = "anthropic"
-    llm_model: str = "claude-sonnet-5"
+    llm_model: str = "claude-opus-5"
+    openai_model: str = "gpt-5"
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+
+    # How many tool rounds one turn may take before the agent gives up and
+    # hands over. A booking needs three or four; a loop needs stopping.
+    agent_max_tool_rounds: int = 8
 
     stt_provider: str = "openai"
     tts_provider: str = "openai"

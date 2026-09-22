@@ -7,7 +7,7 @@ the engine never sees a SQLAlchemy object and stays trivially testable.
 from __future__ import annotations
 
 import uuid
-from datetime import time
+from datetime import UTC, datetime, time
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -253,3 +253,119 @@ async def record_audit(
     # Flush immediately so the row exists at the point the action happened,
     # rather than whenever the surrounding transaction happens to flush next.
     await session.flush()
+
+
+async def practitioner_slugs_by_id(
+    session: AsyncSession, clinic_id: uuid.UUID
+) -> dict[uuid.UUID, str]:
+    rows = (await session.execute(select(models.Practitioner))).scalars()
+    return {r.id: r.slug for r in rows}
+
+
+async def upcoming_for_phone(
+    session: AsyncSession,
+    clinic_id: uuid.UUID,
+    *,
+    phone: str,
+    now: datetime,
+    limit: int = 10,
+) -> list[models.Appointment]:
+    """A patient's future bookings, found by the number they gave.
+
+    Phone is the handle a patient reliably has over the telephone. Row level
+    security keeps the lookup inside this clinic, so a number that exists at
+    another practice finds nothing here.
+    """
+    return list(
+        (
+            await session.execute(
+                select(models.Appointment)
+                .join(models.Patient, models.Appointment.patient_id == models.Patient.id)
+                .where(
+                    models.Patient.phone == phone,
+                    models.Appointment.status == "confirmed",
+                    models.Appointment.starts_at >= now,
+                )
+                .order_by(models.Appointment.starts_at)
+                .limit(limit)
+            )
+        ).scalars()
+    )
+
+
+async def get_or_create_conversation(
+    session: AsyncSession,
+    clinic_id: uuid.UUID,
+    *,
+    conversation_id: uuid.UUID | None,
+    channel: str,
+    llm_provider: str,
+    llm_model: str,
+) -> models.Conversation:
+    if conversation_id is not None:
+        existing = await session.get(models.Conversation, conversation_id)
+        if existing is not None:
+            return existing
+
+    conversation = models.Conversation(
+        id=conversation_id or uuid.uuid4(),
+        clinic_id=clinic_id,
+        channel=channel,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+    )
+    session.add(conversation)
+    await session.flush()
+    return conversation
+
+
+async def load_transcript(
+    session: AsyncSession, *, conversation_id: uuid.UUID, limit: int = 60
+) -> list[models.Message]:
+    """The stored turns, oldest first.
+
+    Capped because a conversation that runs away should cost a bounded amount
+    rather than an unbounded one; a booking that needs sixty turns has already
+    failed and belongs with a person.
+    """
+    rows = list(
+        (
+            await session.execute(
+                select(models.Message)
+                .where(models.Message.conversation_id == conversation_id)
+                .order_by(models.Message.seq.desc())
+                .limit(limit)
+            )
+        ).scalars()
+    )
+    return list(reversed(rows))
+
+
+async def append_message(
+    session: AsyncSession,
+    clinic_id: uuid.UUID,
+    *,
+    conversation_id: uuid.UUID,
+    role: str,
+    content: str,
+    tool_calls: list[dict] | None = None,
+) -> models.Message:
+    message = models.Message(
+        clinic_id=clinic_id,
+        conversation_id=conversation_id,
+        role=role,
+        content=content,
+        tool_calls=tool_calls,
+    )
+    session.add(message)
+    await session.flush()
+    return message
+
+
+async def mark_escalated(session: AsyncSession, *, conversation_id: uuid.UUID, reason: str) -> None:
+    conversation = await session.get(models.Conversation, conversation_id)
+    if conversation is None:
+        return
+    conversation.escalation_reason = reason
+    if conversation.escalated_at is None:
+        conversation.escalated_at = datetime.now(UTC)
