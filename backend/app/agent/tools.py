@@ -8,6 +8,16 @@ tool for it. A prompt can be argued with. A missing capability cannot.
 Every tool is a thin wrapper over `app.services.booking`, which is a thin
 wrapper over the scheduling engine. The model chooses *what* to ask; it never
 computes an answer.
+
+**There is deliberately no tool that confirms a booking.** The assistant can
+offer times and hold one, and that is where its authority ends. Confirming is a
+direct call to `POST /api/appointments` from a card the patient has read and
+acted on, with the name and phone number they typed.
+
+Speech is misheard and models are agreeable; an appointment is something a
+person arranges their day around. Making the last step unreachable from here is
+the difference between a guardrail the model is asked to respect and one it
+cannot cross.
 """
 
 from __future__ import annotations
@@ -110,28 +120,6 @@ DEFINITIONS: list[ToolDefinition] = [
                 },
             },
             "required": ["service_code", "practitioner_slug", "starts_at"],
-        },
-    ),
-    ToolDefinition(
-        name="confirm_booking",
-        description=(
-            "Book a held slot. Only call this after the patient has explicitly "
-            "confirmed the details shown to them, and after you have read their "
-            "name and phone number back to them."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "hold_id": {"type": "string"},
-                "full_name": {"type": "string"},
-                "phone": {"type": "string"},
-                "email": {"type": ["string", "null"]},
-                "notes": {
-                    "type": ["string", "null"],
-                    "description": "Anything the practice should know, in the patient's own words.",
-                },
-            },
-            "required": ["hold_id", "full_name", "phone", "email", "notes"],
         },
     ),
     ToolDefinition(
@@ -285,36 +273,6 @@ async def _hold_slot(args: dict[str, Any], ctx: ToolContext) -> str:
     )
 
 
-async def _confirm_booking(args: dict[str, Any], ctx: ToolContext) -> str:
-    try:
-        hold_id = uuid.UUID(str(args["hold_id"]))
-    except ValueError:
-        return "That reservation reference is not valid."
-
-    appointment = await booking.confirm_appointment(
-        ctx.session,
-        ctx.clinic_id,
-        hold_id=hold_id,
-        patient=booking.PatientDetails(
-            full_name=args["full_name"],
-            phone=args["phone"],
-            email=args.get("email") or None,
-            notes=args.get("notes") or None,
-        ),
-        # Keyed on the hold, not the conversation. Re-confirming the same
-        # hold is a retry; holding a second slot and confirming that is a
-        # patient booking a second appointment, which is not the same thing and
-        # must not be deduplicated away. (HTTP clients get a separate
-        # Idempotency-Key header for their own retries.)
-        idempotency_key=f"hold:{hold_id}",
-        now=ctx.now,
-    )
-    return (
-        f"Booked. appointment_id={appointment.id}, {_when(appointment.starts_at, ctx)}. "
-        "Tell the patient it is confirmed and when to arrive."
-    )
-
-
 async def _find_my_appointments(args: dict[str, Any], ctx: ToolContext) -> str:
     appointments = await repo.upcoming_for_phone(
         ctx.session, ctx.clinic_id, phone=args["phone"], now=ctx.now
@@ -388,7 +346,6 @@ _HANDLERS = {
     "list_services": _list_services,
     "find_availability": _find_availability,
     "hold_slot": _hold_slot,
-    "confirm_booking": _confirm_booking,
     "find_my_appointments": _find_my_appointments,
     "cancel_appointment": _cancel_appointment,
     "escalate": _escalate,

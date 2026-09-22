@@ -311,6 +311,30 @@ class ChatRequest(BaseModel):
     channel: str = Field(default="chat", pattern="^(chat|voice)$")
 
 
+class PendingHold(BaseModel):
+    """A slot reserved but not yet booked.
+
+    Sent so the client can render a confirmation card. The assistant has no
+    tool that confirms a booking; the patient acting on this card is what does.
+    """
+
+    hold_id: uuid.UUID
+    service_code: str
+    service_name: str
+    practitioner_name: str
+    starts_at: datetime
+    ends_at: datetime
+    expires_at: datetime
+
+
+class BookedAppointment(BaseModel):
+    appointment_id: uuid.UUID
+    service_name: str
+    practitioner_name: str
+    starts_at: datetime
+    ends_at: datetime
+
+
 class ChatReply(BaseModel):
     conversation_id: uuid.UUID
     reply: str
@@ -321,6 +345,10 @@ class ChatReply(BaseModel):
     model: str
     input_tokens: int = 0
     output_tokens: int = 0
+    cached_tokens: int = 0
+    # Read back from the database after the turn, not reported by the model.
+    pending_hold: PendingHold | None = None
+    booked: list[BookedAppointment] = Field(default_factory=list)
 
 
 @router.post("/chat", response_model=ChatReply)
@@ -338,6 +366,8 @@ async def chat(
     change while the behaviour does not is the point of the abstraction.
     """
     agent = Agent()
+    now = datetime.now(UTC)
+
     async with tenant_session(clinic_id) as session:
         reply = await agent.respond(
             session,
@@ -346,6 +376,40 @@ async def chat(
             conversation_id=body.conversation_id,
             channel=body.channel,
         )
+
+        services = await repo.load_services(session, clinic_id)
+        hold = await repo.active_hold_for_conversation(
+            session, conversation_id=reply.conversation_id, now=now
+        )
+        pending = None
+        if hold is not None:
+            practitioner = await repo.get_practitioner_by_id(session, hold.practitioner_id)
+            service = services.get(hold.service_code)
+            pending = PendingHold(
+                hold_id=hold.id,
+                service_code=hold.service_code,
+                service_name=service.name if service else hold.service_code,
+                practitioner_name=practitioner.name if practitioner else "",
+                starts_at=hold.starts_at,
+                ends_at=hold.ends_at,
+                expires_at=hold.hold_expires_at,
+            )
+
+        booked = []
+        for appointment in await repo.confirmed_for_conversation(
+            session, conversation_id=reply.conversation_id
+        ):
+            practitioner = await repo.get_practitioner_by_id(session, appointment.practitioner_id)
+            service = services.get(appointment.service_code)
+            booked.append(
+                BookedAppointment(
+                    appointment_id=appointment.id,
+                    service_name=service.name if service else appointment.service_code,
+                    practitioner_name=practitioner.name if practitioner else "",
+                    starts_at=appointment.starts_at,
+                    ends_at=appointment.ends_at,
+                )
+            )
 
     return ChatReply(
         conversation_id=reply.conversation_id,
@@ -357,4 +421,7 @@ async def chat(
         model=reply.model,
         input_tokens=reply.usage.input_tokens,
         output_tokens=reply.usage.output_tokens,
+        cached_tokens=reply.usage.cache_read_tokens,
+        pending_hold=pending,
+        booked=booked,
     )

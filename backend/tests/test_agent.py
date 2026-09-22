@@ -158,7 +158,13 @@ async def _conversation(s, conversation_id) -> models.Conversation:
 # --- a booking that completes ----------------------------------------------
 
 
-async def test_a_booking_conversation_reaches_a_confirmed_appointment(session) -> None:
+async def test_the_agent_can_hold_a_slot_but_not_book_it(session) -> None:
+    """The last step is deliberately out of the model's reach.
+
+    Speech is misheard and models are agreeable. The assistant offers times and
+    reserves one; the appointment is made by a patient acting on a card, via
+    `POST /api/appointments`. There is no tool here that could do it.
+    """
     provider = ScriptedProvider(
         [
             calls(
@@ -170,42 +176,34 @@ async def test_a_booking_conversation_reaches_a_confirmed_appointment(session) -
                 practitioner_slug="dr-hale",
                 starts_at=monday(9).isoformat(),
             ),
-            says("Monday at 9am with Dr. Hale. Shall I book it?"),
+            says("Held. Please complete the form on your screen."),
         ]
     )
-    agent = Agent(provider)
+    reply = await Agent(provider).respond(session, CLINIC, text="I need a cleaning", now=NOW)
 
-    reply = await agent.respond(session, CLINIC, text="I need a cleaning", now=NOW)
     assert reply.tools_used == ["find_availability", "hold_slot"]
+    assert "confirm_booking" not in provider.seen_tools
 
-    hold = (
-        await session.execute(text("SELECT id FROM appointments WHERE status = 'held'"))
-    ).scalar_one()
-
-    provider.script = [
-        calls(
-            "confirm_booking",
-            hold_id=str(hold),
-            full_name="Alex Tran",
-            phone="+886912345678",
-            email=None,
-            notes=None,
-        ),
-        says("Booked. See you Monday at 9am."),
-    ]
-    second = await agent.respond(
-        session,
-        CLINIC,
-        text="Yes please",
-        conversation_id=reply.conversation_id,
-        now=NOW,
-    )
-
-    assert "Booked" in second.text
     status = (
-        await session.execute(text("SELECT status FROM appointments WHERE id = :i"), {"i": hold})
+        await session.execute(
+            text("SELECT status FROM appointments WHERE clinic_id = :c"), {"c": CLINIC}
+        )
     ).scalar_one()
-    assert status == "confirmed"
+    assert status == "held", "the agent must not be able to produce a confirmed appointment"
+
+
+async def test_no_tool_can_confirm_a_booking(session) -> None:
+    """Structural, not a matter of prompting.
+
+    If a confirm tool is ever added back, this fails — which is the point. The
+    guarantee is that the capability is absent, not that the model was asked
+    not to use it.
+    """
+    provider = ScriptedProvider([says("Hello")])
+    await Agent(provider).respond(session, CLINIC, text="Book me in", now=NOW)
+
+    for name in provider.seen_tools:
+        assert "confirm" not in name, f"{name} would let the model book without the patient"
 
 
 async def test_the_transcript_is_persisted_and_replayed(session) -> None:
@@ -241,7 +239,6 @@ async def test_the_model_is_only_ever_offered_appointment_tools(session) -> None
 
     assert sorted(provider.seen_tools) == [
         "cancel_appointment",
-        "confirm_booking",
         "escalate",
         "find_availability",
         "find_my_appointments",

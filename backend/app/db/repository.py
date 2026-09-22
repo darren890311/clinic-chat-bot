@@ -369,3 +369,43 @@ async def mark_escalated(session: AsyncSession, *, conversation_id: uuid.UUID, r
     conversation.escalation_reason = reason
     if conversation.escalated_at is None:
         conversation.escalated_at = datetime.now(UTC)
+
+
+async def active_hold_for_conversation(
+    session: AsyncSession, *, conversation_id: uuid.UUID, now: datetime
+) -> models.Appointment | None:
+    """The slot this conversation is currently holding, if any.
+
+    Read back from the database rather than reported by the agent, so the card
+    the patient sees reflects what is actually reserved rather than what the
+    model believes it reserved.
+    """
+    return (
+        await session.execute(
+            select(models.Appointment)
+            .where(
+                models.Appointment.conversation_id == conversation_id,
+                models.Appointment.status == "held",
+                models.Appointment.hold_expires_at > now,
+            )
+            .order_by(models.Appointment.starts_at)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def confirmed_for_conversation(
+    session: AsyncSession, *, conversation_id: uuid.UUID
+) -> list[models.Appointment]:
+    return list(
+        (
+            await session.execute(
+                select(models.Appointment)
+                .where(
+                    models.Appointment.conversation_id == conversation_id,
+                    models.Appointment.status == "confirmed",
+                )
+                .order_by(models.Appointment.starts_at)
+            )
+        ).scalars()
+    )

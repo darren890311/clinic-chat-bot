@@ -544,6 +544,39 @@ model's context.
 beforehand. With empty calendars the read path is invisible and the system looks
 write-only regardless of what it does.
 
+### A guardrail in the prompt is not a guardrail
+
+The voice contract says nothing is booked without the patient acting on a
+confirmation card. The agent was nonetheless given a `confirm_booking` tool, so
+that rule lived only in the system prompt — a sentence the model was asked to
+respect rather than a boundary it could not cross.
+
+Removing the tool made the guarantee structural. The assistant can offer times
+and hold one; `POST /api/appointments` from the card is what books, with the
+name and phone number the patient typed.
+
+**What broke, and why it is the interesting part.** Removing the tool without
+updating the prompt left the model asked to obtain a confirmation it had no way
+to obtain. Faced with an instruction it could not satisfy, it improvised: asked
+to confirm, it called `escalate`, told the patient the practice would follow
+up, and marked the conversation as needing a human. Every booking would have
+ended in the practice's inbox, and the patient would have been waiting for a
+call that was never scheduled.
+
+Nothing errored. The tool call succeeded, the reply was fluent, and the
+behaviour was completely wrong.
+
+The prompt now states the constraint positively — you cannot book, a form
+appears, point the patient at it — and the model says so plainly:
+
+> *"I can't book it from my side — the appointment is only made once you
+> complete the form on your screen. It's held for about five more minutes."*
+
+The lesson is not about this tool. **The prompt and the tool list are one
+artefact and have to be changed together.** A model given an instruction it
+cannot carry out does not report the contradiction; it finds something else to
+do.
+
 ### Nothing is booked on speech alone
 
 Speech recognition misreads names, dates and digits, and it offers the patient
