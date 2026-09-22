@@ -499,3 +499,58 @@ async def test_the_cached_prefix_is_byte_identical_between_turns(session) -> Non
     assert "current date and time" in provider.contexts[0]
     # And it is nowhere in the cached half.
     assert "current date and time" not in provider.systems[0]
+
+
+async def test_availability_returns_the_whole_day_not_the_first_few(session) -> None:
+    """A truncated list made the assistant deny times that were free.
+
+    Asked for 11:45, it received six slots ending at 10:15, concluded the time
+    was unavailable, and told the patient so. The list is now complete for the
+    range, so a question about any particular time can be answered from it.
+    """
+    provider = ScriptedProvider(
+        [
+            calls(
+                "find_availability",
+                service_code="A",
+                practitioner_slug="dr-hale",
+                earliest=None,
+                days=1,
+            ),
+            says("Here are the times."),
+        ]
+    )
+    await Agent(provider).respond(session, CLINIC, text="What is free today?", now=NOW)
+
+    result = next(m for m in provider.seen_transcripts[-1] if getattr(m, "role", None) == "tool")
+    # 09:00 to 17:00 on a quarter-hour grid is far more than a handful.
+    assert result.content.count(":") > 20
+    assert "5:00 PM" in result.content
+
+
+async def test_the_times_offered_are_clinic_local_with_no_offset(session) -> None:
+    """The model once read "11:45 AM" from the list, wrote "11:45:00+00:00",
+    and asked to hold 07:45 clinic time — which the engine correctly refused,
+    so the assistant told the patient a free slot was taken.
+
+    Mixing clinic-local display times with a UTC example in the same tool
+    result is what invited that. The instruction now matches the display.
+    """
+    provider = ScriptedProvider(
+        [
+            calls(
+                "find_availability",
+                service_code="A",
+                practitioner_slug="dr-hale",
+                earliest=None,
+                days=1,
+            ),
+            says("ok"),
+        ]
+    )
+    await Agent(provider).respond(session, CLINIC, text="anything today?", now=NOW)
+
+    result = next(m for m in provider.seen_transcripts[-1] if getattr(m, "role", None) == "tool")
+    assert "no timezone offset" in result.content
+    assert "+00:00" not in result.content
+    assert "Z\n" not in result.content

@@ -39,6 +39,10 @@ from app.services import booking
 
 # How far ahead a patient may ask about in one query.
 MAX_SEARCH_DAYS = 60
+# Enough to cover several full days of quarter-hour starts without letting a
+# wide search flood the context.
+MAX_SLOTS = 200
+MAX_GROUPS = 8
 
 
 @dataclass
@@ -73,9 +77,11 @@ DEFINITIONS: list[ToolDefinition] = [
     ToolDefinition(
         name="find_availability",
         description=(
-            "Find appointment times for a treatment. Returns the earliest "
-            "options, already checked against the practitioners' own calendars. "
-            "Use this before offering any time to a patient."
+            "Find appointment times for a treatment, already checked against "
+            "the practitioners' own calendars. Returns every start time that "
+            "works in the range, grouped by day, so you can answer questions "
+            "about a specific time without searching again. Use this before "
+            "offering any time to a patient."
         ),
         parameters={
             "type": "object",
@@ -220,6 +226,14 @@ async def _list_services(_: dict[str, Any], ctx: ToolContext) -> str:
 
 
 async def _find_availability(args: dict[str, Any], ctx: ToolContext) -> str:
+    """Every time that works, grouped by day, rather than the first few.
+
+    Returning a truncated list caused the assistant to tell patients a time was
+    unavailable when it was simply past the cut-off: asked for 11:45, it saw
+    six slots ending at 10:15 and said no. A day's worth of quarter-hour starts
+    is a short line of text, and being able to answer "is 11:45 free?" is worth
+    far more than the tokens it costs.
+    """
     days = min(max(int(args.get("days") or 14), 1), MAX_SEARCH_DAYS)
     earliest = _parse_when(args.get("earliest"), ctx) or ctx.now
     if earliest < ctx.now:
@@ -231,7 +245,7 @@ async def _find_availability(args: dict[str, Any], ctx: ToolContext) -> str:
         service_code=args["service_code"],
         search=Interval(earliest, earliest + timedelta(days=days)),
         practitioner_slug=args.get("practitioner_slug") or None,
-        limit=6,
+        limit=MAX_SLOTS,
         now=ctx.now,
     )
 
@@ -243,12 +257,31 @@ async def _find_availability(args: dict[str, Any], ctx: ToolContext) -> str:
         )
 
     names = {s.practitioner.slug: s.practitioner.name for s in await _schedules(ctx)}
-    lines = [
-        f"{_when(slot.start, ctx)} with {names.get(slot.practitioner_slug, slot.practitioner_slug)}"
-        f" ({slot.practitioner_slug}), starts_at={slot.start.isoformat()}"
-        for slot in slots
-    ]
-    return f"{service.name} ({service.duration_minutes} minutes). Available:\n" + "\n".join(lines)
+
+    # Grouped by day and practitioner so the model can answer a question about
+    # any particular time without another round trip.
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for slot in slots:
+        local = slot.start.astimezone(ctx.tz)
+        key = (f"{local:%A %d %B}", slot.practitioner_slug)
+        grouped.setdefault(key, []).append(f"{local:%-I:%M %p}")
+
+    lines = [f"{service.name}, {service.duration_minutes} minutes. Start times available:"]
+    for (day, slug), times in list(grouped.items())[:MAX_GROUPS]:
+        who = names.get(slug, slug)
+        lines.append(f"- {day}, {who} ({slug}): {', '.join(times)}")
+
+    # Local time, no offset. Offering a UTC example beside clinic-local display
+    # times invited the model to staple the two together: it read "11:45 AM",
+    # wrote "11:45:00+00:00", and asked to hold 07:45 clinic time.
+    lines.append(
+        "These are clinic local times. Pass one to hold_slot exactly as "
+        "YYYY-MM-DDTHH:MM with no timezone offset, for example "
+        f"{slots[0].start.astimezone(ctx.tz):%Y-%m-%dT%H:%M}."
+    )
+    if len(slots) >= MAX_SLOTS:
+        lines.append("There may be more beyond this range; narrow the dates to see further.")
+    return "\n".join(lines)
 
 
 async def _hold_slot(args: dict[str, Any], ctx: ToolContext) -> str:
@@ -256,15 +289,25 @@ async def _hold_slot(args: dict[str, Any], ctx: ToolContext) -> str:
     if starts_at is None:
         return "That start time was not a valid date and time."
 
-    hold = await booking.create_hold(
-        ctx.session,
-        ctx.clinic_id,
-        service_code=args["service_code"],
-        practitioner_slug=args["practitioner_slug"],
-        starts_at=starts_at,
-        conversation_id=ctx.conversation_id,
-        now=ctx.now,
-    )
+    try:
+        hold = await booking.create_hold(
+            ctx.session,
+            ctx.clinic_id,
+            service_code=args["service_code"],
+            practitioner_slug=args["practitioner_slug"],
+            starts_at=starts_at,
+            conversation_id=ctx.conversation_id,
+            now=ctx.now,
+        )
+    except errors.SlotUnavailable:
+        # Say which time was actually understood. A bare "not available" hid a
+        # timezone mistake behind a plausible-sounding business answer, and the
+        # assistant repeated it to the patient as fact.
+        raise errors.SlotUnavailable(
+            f"{_when(starts_at, ctx)} is not available. "
+            "Check you sent a clinic local time with no timezone offset, then "
+            "call find_availability again if needed."
+        ) from None
     held_for = int((hold.hold_expires_at - ctx.now).total_seconds() // 60)
     return (
         f"Held. hold_id={hold.id}. {_when(hold.starts_at, ctx)} until "

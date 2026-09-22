@@ -32,6 +32,20 @@ async def current_clinic_id(
     return clinic_id
 
 
+class ClinicOut(BaseModel):
+    """What the client needs to render times the way the practice reads them.
+
+    The timezone is sent explicitly because the browser's own is irrelevant and
+    actively misleading: a patient is walking into a building, and the building
+    has one clock. Formatting in the viewer's zone produced an assistant saying
+    11:45 AM beside a confirmation saying 11:45 PM.
+    """
+
+    name: str
+    timezone: str
+    contact_phone: str | None = None
+
+
 class ServiceOut(BaseModel):
     code: str
     name: str
@@ -63,6 +77,17 @@ async def health() -> dict[str, object]:
         "llm_providers": llm_providers(),
         "calendar_providers": registered_providers(),
     }
+
+
+@router.get("/clinic", response_model=ClinicOut)
+async def clinic_info(clinic_id: uuid.UUID = Depends(current_clinic_id)) -> ClinicOut:
+    async with tenant_session(clinic_id) as session:
+        from app.db import models
+
+        clinic = await session.get(models.Clinic, clinic_id)
+    if clinic is None:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    return ClinicOut(name=clinic.name, timezone=clinic.timezone, contact_phone=clinic.contact_phone)
 
 
 @router.get("/services", response_model=list[ServiceOut])

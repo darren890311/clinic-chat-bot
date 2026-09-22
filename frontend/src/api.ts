@@ -1,3 +1,9 @@
+export type Clinic = {
+  name: string
+  timezone: string
+  contact_phone: string | null
+}
+
 export type Service = {
   code: string
   name: string
@@ -62,6 +68,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
+export const getClinic = () => request<Clinic>('/api/clinic')
+
 export const listServices = () => request<Service[]>('/api/services')
 
 export const sendMessage = (message: string, conversationId: string | null) =>
@@ -82,17 +90,37 @@ export const confirmBooking = (
     body: JSON.stringify({ hold_id: holdId, patient }),
   })
 
-/** Clinic-local, readable. The server sends UTC; the browser renders it. */
+/**
+ * Times are rendered in the *practice's* timezone, never the viewer's.
+ *
+ * A patient is walking into a building and the building has one clock. Using
+ * the browser's zone produced an assistant saying 11:45 AM beside a
+ * confirmation saying 11:45 PM for the same appointment, because the server
+ * formats in clinic time and the client was formatting in Taipei time.
+ */
+let clinicTimeZone = 'UTC'
+
+export function setClinicTimeZone(tz: string) {
+  clinicTimeZone = tz
+}
+
 export function formatWhen(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
+  return new Date(iso).toLocaleString('en-GB', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
     hour: 'numeric',
     minute: '2-digit',
+    hour12: true,
+    timeZone: clinicTimeZone,
   })
 }
 
 export function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  return new Date(iso).toLocaleTimeString('en-GB', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: clinicTimeZone,
+  })
 }

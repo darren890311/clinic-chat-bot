@@ -3,16 +3,22 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import ConfirmationCard from './components/ConfirmationCard.vue'
 import {
   formatWhen,
+  getClinic,
   listServices,
   sendMessage,
+  setClinicTimeZone,
   type BookedAppointment,
   type PendingHold,
   type Service,
 } from './api'
 
 type Turn = { role: 'patient' | 'assistant'; text: string }
+type Booking = BookedAppointment & { patient_name?: string; patient_phone?: string }
 
+const clinicName = ref('')
+const contactPhone = ref<string | null>(null)
 const services = ref<Service[]>([])
+
 const turns = ref<Turn[]>([])
 const draft = ref('')
 const sending = ref(false)
@@ -20,20 +26,29 @@ const error = ref('')
 
 const conversationId = ref<string | null>(null)
 const hold = ref<PendingHold | null>(null)
-const booked = ref<BookedAppointment[]>([])
+const bookings = ref<Booking[]>([])
 const escalated = ref(false)
 const escalationReason = ref<string | null>(null)
 
-// Shown because being able to watch the vendor change while the behaviour does
-// not is the point of the provider abstraction.
 const provider = ref('')
 const model = ref('')
 const cachedTokens = ref(0)
 
 const log = ref<HTMLElement | null>(null)
 const canSend = computed(() => draft.value.trim().length > 0 && !sending.value && !escalated.value)
-
 const urgent = computed(() => escalationReason.value === 'urgent_symptoms')
+
+/**
+ * Starting suggestions.
+ *
+ * A blank box asking an open question is the worst opening a booking flow can
+ * have — the patient has to guess what the assistant understands. These are
+ * ordinary sentences, not commands, so tapping one and typing one reach the
+ * same place. They disappear once the conversation has started.
+ */
+const suggestions = computed(() =>
+  services.value.slice(0, 4).map((s) => `I'd like to book ${s.name.toLowerCase()}`),
+)
 
 async function scroll() {
   await nextTick()
@@ -43,25 +58,30 @@ async function scroll() {
 watch(turns, scroll, { deep: true })
 watch(hold, scroll)
 
-async function send() {
-  if (!canSend.value) return
-  const text = draft.value.trim()
+async function send(text?: string) {
+  const message = (text ?? draft.value).trim()
+  if (!message || sending.value || escalated.value) return
   draft.value = ''
-  turns.value.push({ role: 'patient', text })
+  turns.value.push({ role: 'patient', text: message })
   sending.value = true
   error.value = ''
 
   try {
-    const reply = await sendMessage(text, conversationId.value)
+    const reply = await sendMessage(message, conversationId.value)
     conversationId.value = reply.conversation_id
     turns.value.push({ role: 'assistant', text: reply.reply })
     hold.value = reply.pending_hold
-    booked.value = reply.booked
     escalated.value = reply.escalated
     escalationReason.value = reply.escalation_reason
     provider.value = reply.provider
     model.value = reply.model
     cachedTokens.value = reply.cached_tokens
+
+    // Keep any patient details already shown against a booking we know about.
+    bookings.value = reply.booked.map((b) => ({
+      ...b,
+      ...bookings.value.find((known) => known.appointment_id === b.appointment_id),
+    }))
   } catch (e) {
     error.value = (e as Error).message
   } finally {
@@ -69,21 +89,31 @@ async function send() {
   }
 }
 
-function onBooked() {
+/**
+ * The card booked it.
+ *
+ * Nothing is sent to the assistant here. It learns about the booking from the
+ * server on the patient's next message, because the appointment is in the
+ * database and the turn context reads it from there. Faking a patient message
+ * to tell it would put words in their mouth and cost a model call to say
+ * something the server already knows.
+ */
+function onBooked(booking: Booking) {
   hold.value = null
-  turns.value.push({
-    role: 'assistant',
-    text: 'That is booked. You will find the details above.',
-  })
-  // Ask the assistant to pick the conversation back up, so the transcript
-  // stays coherent rather than ending on a form submission.
-  draft.value = 'Thanks, that is booked.'
-  void send()
+  bookings.value = [...bookings.value.filter((b) => b.appointment_id !== booking.appointment_id), booking]
 }
 
 onMounted(async () => {
   try {
-    services.value = await listServices()
+    const [clinic, list] = await Promise.all([getClinic(), listServices()])
+    clinicName.value = clinic.name
+    contactPhone.value = clinic.contact_phone
+    setClinicTimeZone(clinic.timezone)
+    services.value = list
+    turns.value.push({
+      role: 'assistant',
+      text: `Hello — I book appointments for ${clinic.name}. What do you need to come in for?`,
+    })
   } catch (e) {
     error.value = (e as Error).message
   }
@@ -94,49 +124,56 @@ onMounted(async () => {
   <div class="wrap">
     <header class="top">
       <div>
-        <h1>Darren Dental</h1>
+        <h1>{{ clinicName || 'Loading…' }}</h1>
         <p class="sub">Book an appointment</p>
       </div>
-      <p v-if="provider" class="engine" :title="`${provider} / ${model}`">
+      <p v-if="provider" class="engine">
         {{ provider }} · {{ model }}
         <span v-if="cachedTokens" class="cache">{{ cachedTokens }} cached</span>
       </p>
     </header>
 
-    <section v-if="services.length" class="services" aria-label="Treatments offered">
-      <span v-for="s in services" :key="s.code" class="chip">
-        {{ s.name }} · {{ s.duration_minutes }} min
-      </span>
-    </section>
-
     <div ref="log" class="log" role="log" aria-live="polite">
-      <p v-if="!turns.length" class="hint">
-        Try “I need a cleaning next week” or “what do you offer?”
-      </p>
-
       <div v-for="(turn, i) in turns" :key="i" class="turn" :class="turn.role">
         <span class="who">{{ turn.role === 'patient' ? 'You' : 'Assistant' }}</span>
         <p>{{ turn.text }}</p>
       </div>
 
+      <!-- Only before the patient has said anything. After that the assistant
+           is asking its own questions and a menu would talk over it. -->
+      <div v-if="turns.length === 1 && suggestions.length" class="suggestions">
+        <button v-for="s in suggestions" :key="s" type="button" @click="send(s)">
+          {{ s }}
+        </button>
+        <button type="button" class="ghost" @click="send('What do you offer?')">
+          Something else
+        </button>
+      </div>
+
       <p v-if="sending" class="thinking">…</p>
 
-      <!-- The assistant cannot book. This is what books. -->
-      <ConfirmationCard
-        v-if="hold"
-        :hold="hold"
-        @booked="onBooked"
-        @expired="hold = null"
-      />
+      <ConfirmationCard v-if="hold" :hold="hold" @booked="onBooked" @expired="hold = null" />
 
-      <div v-for="a in booked" :key="a.appointment_id" class="booked">
-        <strong>Booked</strong>
-        {{ a.service_name }} with {{ a.practitioner_name }}, {{ formatWhen(a.starts_at) }}
+      <div v-for="b in bookings" :key="b.appointment_id" class="booked">
+        <p class="booked-head"><strong>Booked</strong> {{ b.service_name }}</p>
+        <dl>
+          <div><dt>With</dt><dd>{{ b.practitioner_name }}</dd></div>
+          <div><dt>When</dt><dd>{{ formatWhen(b.starts_at) }}</dd></div>
+          <!-- Shown back so the patient can see what was recorded, and tell us
+               if a name or number was typed wrong. -->
+          <div v-if="b.patient_name"><dt>Name</dt><dd>{{ b.patient_name }}</dd></div>
+          <div v-if="b.patient_phone"><dt>Phone</dt><dd>{{ b.patient_phone }}</dd></div>
+        </dl>
+        <p class="check">
+          If anything here is wrong, tell me below and I will sort it out.
+        </p>
       </div>
     </div>
 
     <div v-if="escalated" class="escalated" :class="{ urgent }" role="alert">
-      <strong v-if="urgent">Please call the practice now.</strong>
+      <strong v-if="urgent">
+        Please call the practice now{{ contactPhone ? ` on ${contactPhone}` : '' }}.
+      </strong>
       <strong v-else>Passed to the practice.</strong>
       <span v-if="urgent">
         If you cannot reach anyone, or your symptoms are severe, go to an emergency
@@ -145,7 +182,7 @@ onMounted(async () => {
       <span v-else>Someone will follow up with you.</span>
     </div>
 
-    <form class="composer" @submit.prevent="send">
+    <form class="composer" @submit.prevent="send()">
       <input
         v-model="draft"
         type="text"
@@ -195,31 +232,14 @@ h1 {
   display: block;
   opacity: 0.7;
 }
-.services {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 14px 0 6px;
-}
-.chip {
-  font-size: 0.75rem;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 3px 10px;
-}
 .log {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 0;
+  padding: 16px 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  min-height: 16rem;
-}
-.hint {
-  color: var(--muted);
-  font-size: 0.9rem;
+  min-height: 18rem;
 }
 .turn {
   display: grid;
@@ -249,20 +269,74 @@ h1 {
   border-color: var(--accent);
   color: #fff;
 }
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.suggestions button {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--surface);
+  color: var(--accent);
+  cursor: pointer;
+}
+.suggestions button:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.suggestions .ghost {
+  border-color: var(--border);
+  color: var(--muted);
+}
+.suggestions .ghost:hover {
+  background: var(--border);
+  color: var(--text);
+}
 .thinking {
   color: var(--muted);
   margin: 0;
   letter-spacing: 0.2em;
 }
 .booked {
+  border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
-  padding: 8px 12px;
-  font-size: 0.9rem;
+  border-radius: 8px;
+  padding: 12px 14px;
   background: var(--surface);
 }
-.booked strong {
+.booked-head {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+.booked-head strong {
   color: var(--accent);
   margin-right: 6px;
+}
+.booked dl {
+  margin: 0;
+  display: grid;
+  gap: 3px;
+}
+.booked dl > div {
+  display: flex;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+.booked dt {
+  color: var(--muted);
+  min-width: 4rem;
+}
+.booked dd {
+  margin: 0;
+}
+.check {
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
 }
 .escalated {
   border: 1px solid var(--border);

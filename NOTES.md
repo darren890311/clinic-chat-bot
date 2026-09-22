@@ -544,6 +544,63 @@ model's context.
 beforehand. With empty calendars the read path is invisible and the system looks
 write-only regardless of what it does.
 
+### Two ways the assistant told patients a free slot was taken
+
+Both were found by using the thing rather than by a failing test, and neither
+raised an error. The assistant produced a fluent, confident, wrong answer.
+
+**A truncated tool result read as a complete one.** `find_availability`
+returned the earliest six slots. Asked for 11:45, the model received a list
+ending at 10:15, concluded the time was unavailable, and said so. Nothing in
+the result indicated it had been cut off, so there was nothing for the model to
+be suspicious of.
+
+It now returns every start time in the range, grouped by day. A day of
+quarter-hour starts is one short line of text; being able to answer "is 11:45
+free?" without another round trip is worth far more than the tokens.
+
+**Clinic-local display times beside a UTC example.** The result listed times as
+`11:45 AM` and then said "pass the exact start time as an ISO datetime, for
+example 2026-09-23T13:00:00+00:00". The model did the obvious thing and
+combined the two: it sent `2026-09-24T11:45:00+00:00`, which is 07:45 at the
+practice, before opening. The engine refused correctly, and the assistant
+relayed the refusal to the patient as a fact about availability.
+
+The instruction now matches the display — clinic local time, no offset, with a
+local-format example — and the refusal message names the time it actually
+understood, so a timezone mistake reads as one instead of hiding behind a
+plausible business answer.
+
+The shared lesson is about the boundary rather than either bug: **a tool result
+is a prompt.** Anything ambiguous in it will be resolved by a model that has no
+way to check, and the result will be delivered to a patient in a confident
+voice.
+
+### A patient's clock is not the clinic's clock
+
+The assistant said 11:45 AM and the confirmation beneath it said 11:45 PM, for
+the same appointment. The server formats in the practice's timezone; the
+browser was formatting in the viewer's, which during development was Taipei.
+
+Times are now rendered with the clinic's timezone, fetched from `/api/clinic`.
+A patient is walking into a building, and the building has one clock.
+
+### The assistant could not see what the card had done
+
+Booking moved out of the model's reach, which left it unable to tell whether
+the patient had completed the form. A patient who had just booked was told to
+complete the form, because from the model's side nothing had happened.
+
+Confirmed appointments and any live hold for the conversation are now part of
+the per-turn context — the uncached channel that already carried the current
+time — read from the database rather than announced by the client.
+
+The first attempt was worse: the client sent a synthetic "Thanks, that is
+booked" as though the patient had typed it. That put words in their mouth,
+spent a model call to say something the server already knew, and still left the
+model guessing. State the system owns belongs in the context, not in a fake
+turn.
+
 ### A guardrail in the prompt is not a guardrail
 
 The voice contract says nothing is booked without the patient acting on a

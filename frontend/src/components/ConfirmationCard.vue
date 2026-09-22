@@ -11,10 +11,16 @@
  * nobody can reach.
  */
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { confirmBooking, formatTime, formatWhen, type PendingHold } from '../api'
+import {
+  confirmBooking,
+  formatTime,
+  formatWhen,
+  type BookedAppointment,
+  type PendingHold,
+} from '../api'
 
 const props = defineProps<{ hold: PendingHold }>()
-const emit = defineEmits<{ booked: [id: string]; expired: [] }>()
+const emit = defineEmits<{ booked: [booking: BookedAppointment & { patient_name: string; patient_phone: string }]; expired: [] }>()
 
 const fullName = ref('')
 const phone = ref('')
@@ -65,7 +71,16 @@ async function submit() {
       phone: phone.value.trim(),
       email: email.value.trim() || null,
     })
-    emit('booked', appointment.appointment_id)
+    emit('booked', {
+      appointment_id: appointment.appointment_id,
+      service_name: props.hold.service_name,
+      practitioner_name: appointment.practitioner_name,
+      starts_at: appointment.starts_at,
+      ends_at: appointment.ends_at,
+      // Echoed back so the patient can check what was recorded against them.
+      patient_name: fullName.value.trim(),
+      patient_phone: phone.value.trim(),
+    })
   } catch (e) {
     error.value = (e as Error).message
   } finally {

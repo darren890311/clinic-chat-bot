@@ -122,7 +122,9 @@ class Agent:
             )
 
         system = await self._system_prompt(session, clinic_id, now=now)
-        turn_context = await self._context(session, clinic_id, now=now)
+        turn_context = await self._context(
+            session, clinic_id, conversation_id=conversation.id, now=now
+        )
         transcript = await self._transcript(session, conversation_id=conversation.id)
 
         tool_context = agent_tools.ToolContext(
@@ -305,10 +307,57 @@ class Agent:
             practitioners=practitioners,
         )
 
-    async def _context(self, session: AsyncSession, clinic_id: uuid.UUID, *, now: datetime) -> str:
-        """Per-turn facts the model needs but must not cache."""
-        local = now.astimezone((await repo.load_policy(session, clinic_id)).tz)
-        return f"The current date and time at the practice is {local:%A %d %B %Y, %-I:%M %p}."
+    async def _context(
+        self,
+        session: AsyncSession,
+        clinic_id: uuid.UUID,
+        *,
+        conversation_id: uuid.UUID,
+        now: datetime,
+    ) -> str:
+        """Per-turn facts the model needs but must not cache.
+
+        Booking state is included because the assistant cannot see the
+        confirmation card. Without it, a patient who has just completed the
+        form is told to complete the form — the assistant has no tool that
+        books, so it has no record that anything did.
+
+        Read from the database rather than announced by the client, so it
+        reflects what was actually booked.
+        """
+        policy = await repo.load_policy(session, clinic_id)
+        local = now.astimezone(policy.tz)
+        lines = [f"The current date and time at the practice is {local:%A %d %B %Y, %-I:%M %p}."]
+
+        services = await repo.load_services(session, clinic_id)
+
+        def describe(appointment) -> str:
+            service = services.get(appointment.service_code)
+            name = service.name if service else appointment.service_code
+            when = appointment.starts_at.astimezone(policy.tz)
+            return f"{name} on {when:%A %d %B at %-I:%M %p}"
+
+        confirmed = await repo.confirmed_for_conversation(session, conversation_id=conversation_id)
+        if confirmed:
+            booked = "; ".join(describe(a) for a in confirmed)
+            lines.append(
+                f"This patient has already completed the form and these appointments are "
+                f"booked: {booked}. Do not ask them to fill in the form again. Treat these "
+                f"as settled unless they ask to change one."
+            )
+
+        hold = await repo.active_hold_for_conversation(
+            session, conversation_id=conversation_id, now=now
+        )
+        if hold is not None:
+            minutes = max(0, int((hold.hold_expires_at - now).total_seconds() // 60))
+            lines.append(
+                f"A slot is held and showing on the patient's screen as a confirmation "
+                f"form: {describe(hold)}, for about {minutes} more minutes. It is not "
+                f"booked until they submit that form."
+            )
+
+        return "\n".join(lines)
 
     async def _transcript(
         self, session: AsyncSession, *, conversation_id: uuid.UUID
