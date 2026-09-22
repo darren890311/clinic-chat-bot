@@ -409,3 +409,31 @@ async def confirmed_for_conversation(
             )
         ).scalars()
     )
+
+
+async def update_patient_details(
+    session: AsyncSession,
+    clinic_id: uuid.UUID,
+    *,
+    patient_id: uuid.UUID,
+    full_name: str | None = None,
+    phone: str | None = None,
+    email: str | None = None,
+) -> models.Patient | None:
+    """Correct what a patient typed about themselves.
+
+    Contact details only — this table holds nothing clinical, so there is
+    nothing here that needs a practitioner's judgement to change. A mistyped
+    name is exactly the sort of thing a receptionist fixes without ceremony.
+    """
+    patient = await session.get(models.Patient, patient_id)
+    if patient is None:
+        return None
+    if full_name:
+        patient.full_name = full_name
+    if phone:
+        patient.phone = phone
+    if email is not None:
+        patient.email = email or None
+    await session.flush()
+    return patient

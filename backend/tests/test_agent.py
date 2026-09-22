@@ -239,6 +239,7 @@ async def test_the_model_is_only_ever_offered_appointment_tools(session) -> None
 
     assert sorted(provider.seen_tools) == [
         "cancel_appointment",
+        "correct_my_details",
         "escalate",
         "find_availability",
         "find_my_appointments",
@@ -258,19 +259,27 @@ async def test_the_brief_tells_the_model_what_it_must_not_do(session) -> None:
     assert "Dr. Hale" in prompt
 
 
-async def test_an_out_of_scope_request_escalates_and_is_recorded(session) -> None:
+async def test_an_out_of_scope_question_is_recorded_but_does_not_end_the_conversation(
+    session,
+) -> None:
+    """Declining to discuss insurance is not a handover.
+
+    Locking the composer after a question the assistant simply does not answer
+    strands a patient who still wants an appointment. The escalation is
+    recorded so the practice can see what was asked; the conversation carries
+    on.
+    """
     provider = ScriptedProvider(
         [
             calls("escalate", reason="out_of_scope", summary="Asked about insurance billing"),
-            says("I cannot help with billing, but I can pass you to the practice."),
+            says("I cannot help with billing, but I can still book you in."),
         ]
     )
     reply = await Agent(provider).respond(
         session, CLINIC, text="How much does my insurance cover?", now=NOW
     )
 
-    assert reply.escalated is True
-    assert reply.escalation_reason == "out_of_scope"
+    assert reply.escalated is False, "an unanswerable question is not a handover"
 
     actions = (
         (
@@ -282,6 +291,17 @@ async def test_an_out_of_scope_request_escalates_and_is_recorded(session) -> Non
         .all()
     )
     assert "conversation.escalated" in actions
+
+    # And the patient can carry straight on.
+    provider.script = [says("Thursday at nine, then?")]
+    follow_up = await Agent(provider).respond(
+        session,
+        CLINIC,
+        text="Fine, just book me a cleaning",
+        conversation_id=reply.conversation_id,
+        now=NOW,
+    )
+    assert follow_up.text == "Thursday at nine, then?"
 
 
 async def test_urgent_symptoms_stop_the_booking_flow(session) -> None:

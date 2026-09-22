@@ -124,8 +124,22 @@ DEFINITIONS: list[ToolDefinition] = [
                     "type": "string",
                     "description": "ISO-8601 start time, exactly as returned by find_availability.",
                 },
+                "replaces_appointment_id": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "When the patient is moving an existing appointment, its "
+                        "id. That appointment is cancelled automatically when "
+                        "this one is confirmed, so do not cancel it yourself. "
+                        "Null for a new booking."
+                    ),
+                },
             },
-            "required": ["service_code", "practitioner_slug", "starts_at"],
+            "required": [
+                "service_code",
+                "practitioner_slug",
+                "starts_at",
+                "replaces_appointment_id",
+            ],
         },
     ),
     ToolDefinition(
@@ -147,6 +161,23 @@ DEFINITIONS: list[ToolDefinition] = [
                 "reason": {"type": ["string", "null"]},
             },
             "required": ["appointment_id", "reason"],
+        },
+    ),
+    ToolDefinition(
+        name="correct_my_details",
+        description=(
+            "Fix the name, phone number or email recorded against this "
+            "patient's bookings. Use it when they say something was typed or "
+            "heard wrong. Contact details only — nothing clinical."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "full_name": {"type": ["string", "null"]},
+                "phone": {"type": ["string", "null"]},
+                "email": {"type": ["string", "null"]},
+            },
+            "required": ["full_name", "phone", "email"],
         },
     ),
     ToolDefinition(
@@ -289,6 +320,12 @@ async def _hold_slot(args: dict[str, Any], ctx: ToolContext) -> str:
     if starts_at is None:
         return "That start time was not a valid date and time."
 
+    replaces = args.get("replaces_appointment_id")
+    try:
+        replaces_id = uuid.UUID(str(replaces)) if replaces else None
+    except ValueError:
+        return "That appointment reference is not valid."
+
     try:
         hold = await booking.create_hold(
             ctx.session,
@@ -297,6 +334,7 @@ async def _hold_slot(args: dict[str, Any], ctx: ToolContext) -> str:
             practitioner_slug=args["practitioner_slug"],
             starts_at=starts_at,
             conversation_id=ctx.conversation_id,
+            replaces_appointment_id=replaces_id,
             now=ctx.now,
         )
     except errors.SlotUnavailable:
@@ -309,10 +347,16 @@ async def _hold_slot(args: dict[str, Any], ctx: ToolContext) -> str:
             "call find_availability again if needed."
         ) from None
     held_for = int((hold.hold_expires_at - ctx.now).total_seconds() // 60)
+    moving = (
+        " The appointment it replaces is cancelled automatically when this one "
+        "is confirmed; do not cancel it yourself."
+        if replaces_id
+        else ""
+    )
     return (
         f"Held. hold_id={hold.id}. {_when(hold.starts_at, ctx)} until "
         f"{_when(hold.ends_at, ctx)}. Reserved for about {held_for} minutes — "
-        "show the patient these details and ask them to confirm."
+        f"tell the patient the form is on their screen.{moving}"
     )
 
 
@@ -354,6 +398,53 @@ async def _cancel_appointment(args: dict[str, Any], ctx: ToolContext) -> str:
     return f"Cancelled the appointment on {_when(appointment.starts_at, ctx)}."
 
 
+async def _correct_my_details(args: dict[str, Any], ctx: ToolContext) -> str:
+    """Correct the contact details on this conversation's bookings.
+
+    Scoped to appointments made in this conversation. Letting the assistant
+    edit a patient found by any other means would turn a typo fix into a way
+    to overwrite somebody else's record.
+    """
+    appointments = await repo.confirmed_for_conversation(
+        ctx.session, conversation_id=ctx.conversation_id
+    )
+    patient_ids = {a.patient_id for a in appointments if a.patient_id}
+    if not patient_ids:
+        return (
+            "There are no confirmed bookings in this conversation yet, so there "
+            "is nothing to correct. The details are taken from the form."
+        )
+
+    updated = None
+    for patient_id in patient_ids:
+        updated = await repo.update_patient_details(
+            ctx.session,
+            ctx.clinic_id,
+            patient_id=patient_id,
+            full_name=args.get("full_name") or None,
+            phone=args.get("phone") or None,
+            email=args.get("email"),
+        )
+
+    if updated is None:
+        return "I could not find the record to correct."
+
+    await repo.record_audit(
+        ctx.session,
+        ctx.clinic_id,
+        actor="bot",
+        action="patient.details_corrected",
+        entity_type="patient",
+        entity_id=updated.id,
+        detail={k: v for k, v in args.items() if v},
+    )
+    return (
+        f"Updated. The bookings now read: {updated.full_name}, {updated.phone}"
+        f"{', ' + updated.email if updated.email else ''}. "
+        "Read it back to the patient so they can check it."
+    )
+
+
 async def _escalate(args: dict[str, Any], ctx: ToolContext) -> str:
     """Mark the conversation for a human.
 
@@ -391,6 +482,7 @@ _HANDLERS = {
     "hold_slot": _hold_slot,
     "find_my_appointments": _find_my_appointments,
     "cancel_appointment": _cancel_appointment,
+    "correct_my_details": _correct_my_details,
     "escalate": _escalate,
 }
 

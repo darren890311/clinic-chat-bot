@@ -601,6 +601,49 @@ spent a model call to say something the server already knew, and still left the
 model guessing. State the system owns belongs in the context, not in a fake
 turn.
 
+### The interface promised something the assistant could not do
+
+The confirmation card ends with *"If anything here is wrong, tell me below and
+I will sort it out."* A patient who noticed their name was mistyped said so,
+and the assistant escalated: *"Someone from the practice will follow up with
+you to fix the name."* Then the composer locked, for a typo.
+
+Two separate mistakes met here.
+
+**A promise written in the UI with no capability behind it.** There was no tool
+that could change a patient's contact details, so the model did the only thing
+left and handed it to a human. Correcting a name is ordinary reception work on
+data the patient typed thirty seconds earlier; it now has a tool, scoped to
+bookings made in this conversation so that a typo fix cannot become a way to
+overwrite somebody else's record.
+
+**Escalation treated as one thing when it is three.** Being told to go to
+hospital, and asking to speak to a person, genuinely hand the conversation
+over — a bot answering in parallel is how a patient gets two different
+answers. Declining to discuss insurance does not. The lock now applies only to
+the reasons that are a handover, so a patient who asks something out of scope
+can still book afterwards.
+
+The first mistake is the one worth carrying: **UI copy is a specification.**
+"I will sort it out" is a claim about the system, and nothing checks it.
+
+### Moving an appointment is one operation, not two
+
+Rescheduling was possible by cancelling and rebooking, which leaves a patient
+holding both appointments or neither depending on where they stop. Booking
+first and cancelling after risks a double booking if they walk away; cancelling
+first risks losing the slot and getting nothing.
+
+Worse, the assistant could not do it cleanly anyway. The per-turn context
+described booked appointments in prose — *"Routine Cleaning with Dr. Hale on
+Thursday at 2:00 PM"* — with no id, so it had no way to name the one to cancel
+and fell back to asking the patient for the phone number on a booking it had
+made itself a minute earlier.
+
+A hold now records the appointment it replaces, and confirming it cancels that
+one in the same transaction. The exchange happens or it does not. The context
+carries ids, and the assistant is told not to cancel anything itself.
+
 ### Caution that refused the job
 
 The first version of the urgent-symptoms rule listed "severe pain" as an

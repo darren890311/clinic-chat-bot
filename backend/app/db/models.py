@@ -184,6 +184,12 @@ class Appointment(Base):
     google_event_id: Mapped[str | None] = mapped_column(String(320))
     microsoft_event_id: Mapped[str | None] = mapped_column(String(320))
     mirror_error: Mapped[str | None] = mapped_column(Text)
+    # Set on a hold that is a rescheduling of an existing appointment. The
+    # replaced one is cancelled when this is confirmed, in the same
+    # transaction, so a patient never ends up holding both or neither.
+    replaces_appointment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("appointments.id", ondelete="SET NULL")
+    )
     idempotency_key: Mapped[str | None] = mapped_column(String(64))
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     notes: Mapped[str | None] = mapped_column(Text)

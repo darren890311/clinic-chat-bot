@@ -21,6 +21,7 @@ Three independent defences against double booking, in the order they fire:
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import uuid
 from dataclasses import dataclass
@@ -101,6 +102,7 @@ async def create_hold(
     practitioner_slug: str,
     starts_at: datetime,
     conversation_id: uuid.UUID | None = None,
+    replaces_appointment_id: uuid.UUID | None = None,
     now: datetime | None = None,
 ) -> models.Appointment:
     """Reserve a slot for a few minutes while the patient decides.
@@ -145,6 +147,7 @@ async def create_hold(
         status="held",
         hold_expires_at=now + timedelta(seconds=settings.hold_ttl_seconds),
         conversation_id=conversation_id,
+        replaces_appointment_id=replaces_appointment_id,
     )
     session.add(hold)
     await _flush_or_conflict(session, slot)
@@ -161,6 +164,7 @@ async def create_hold(
             "practitioner": practitioner_slug,
             "starts_at": slot.start.isoformat(),
             "expires_at": hold.hold_expires_at.isoformat(),
+            "replaces": str(replaces_appointment_id) if replaces_appointment_id else None,
         },
     )
     return hold
@@ -246,6 +250,20 @@ async def confirm_appointment(
             "patient_id": str(patient_row.id),
         },
     )
+
+    # A rescheduling completes here or not at all. The old appointment is
+    # released in the same transaction that books the new one, so the patient
+    # is never left holding both or neither.
+    if hold.replaces_appointment_id:
+        # Already gone is fine; the move still stands.
+        with contextlib.suppress(errors.AppointmentNotFound):
+            await cancel_appointment(
+                session,
+                clinic_id,
+                appointment_id=hold.replaces_appointment_id,
+                reason="rescheduled",
+                actor="bot",
+            )
 
     # The booking now exists. Mirroring runs afterwards and never raises: a
     # calendar outage leaves an appointment that is not yet mirrored, which

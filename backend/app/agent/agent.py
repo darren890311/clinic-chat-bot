@@ -53,6 +53,15 @@ ESCALATED = (
     "Is there anything else I can help you arrange?"
 )
 
+# Reasons that genuinely hand the conversation to a person. A patient who is
+# being told to go to hospital, or who asked for a human, should not then get
+# a bot answering in parallel.
+#
+# "out_of_scope" is deliberately absent. Declining to discuss insurance is not
+# a handover; the patient may still want to book, and locking the composer
+# after a question the assistant simply does not answer strands them.
+HANDOVER_REASONS = {"urgent_symptoms", "patient_request", "system_error"}
+
 
 @dataclass
 class AgentReply:
@@ -103,8 +112,12 @@ class Agent:
         )
 
         # An escalated conversation belongs to a person now. Continuing to book
-        # around them is how a patient ends up with two different answers.
-        if conversation.escalated_at is not None:
+        # around them is how a patient ends up with two different answers —
+        # but only for the reasons that really are a handover.
+        if (
+            conversation.escalated_at is not None
+            and conversation.escalation_reason in HANDOVER_REASONS
+        ):
             await repo.append_message(
                 session,
                 clinic_id,
@@ -222,7 +235,9 @@ class Agent:
                 )
 
             await session.refresh(conversation)
-            if conversation.escalated_at is not None:
+            if conversation.escalation_reason in HANDOVER_REASONS and (
+                conversation.escalated_at is not None
+            ):
                 # The escalate tool fired. Let the model phrase the handover in
                 # its next turn rather than cutting the patient off mid-sentence.
                 continue
@@ -266,10 +281,14 @@ class Agent:
             session, clinic_id, conversation_id=conversation.id, role="assistant", content=text
         )
         await session.refresh(conversation)
+        handed_over = (
+            conversation.escalated_at is not None
+            and conversation.escalation_reason in HANDOVER_REASONS
+        )
         return AgentReply(
             conversation_id=conversation.id,
             text=text,
-            escalated=escalated or conversation.escalated_at is not None,
+            escalated=escalated or handed_over,
             escalation_reason=conversation.escalation_reason,
             tools_used=used,
             usage=usage,
@@ -345,7 +364,13 @@ class Agent:
             who = practitioners.get(slugs.get(appointment.practitioner_id, ""), "")
             when = appointment.starts_at.astimezone(policy.tz)
             with_who = f" with {who}" if who else ""
-            return f"{name}{with_who} on {when:%A %d %B at %-I:%M %p}"
+            # The id is included so a move can name the appointment it
+            # replaces. Without it the assistant had to ask the patient for
+            # their phone number to look up a booking it had just made.
+            return (
+                f"{name}{with_who} on {when:%A %d %B at %-I:%M %p} "
+                f"(appointment_id={appointment.id})"
+            )
 
         confirmed = await repo.confirmed_for_conversation(session, conversation_id=conversation_id)
         if confirmed:
