@@ -1,0 +1,73 @@
+name: Deploy
+
+# Deploys on every push to main once CI passes. Set up on day one deliberately:
+# the failure mode we are avoiding is discovering a deployment problem on the
+# afternoon of the deadline, on top of everything else.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+env:
+  SERVICE: clinic-chat-bot
+  REGION: asia-east1
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # Workload Identity Federation; no long-lived JSON key in secrets.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push
+        run: |
+          IMAGE="${REGION}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/app/${SERVICE}:${{ github.sha }}"
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Migrate
+        # Migrations run as the OWNER role and as a one-off job, before the new
+        # revision serves traffic. The running service never holds owner rights.
+        run: |
+          gcloud run jobs deploy ${SERVICE}-migrate \
+            --image "$IMAGE" --region "$REGION" --quiet \
+            --set-secrets MIGRATION_DATABASE_URL=migration-database-url:latest \
+            --command alembic --args upgrade,head
+          gcloud run jobs execute ${SERVICE}-migrate --region "$REGION" --wait
+
+      - name: Deploy
+        run: |
+          gcloud run deploy ${SERVICE} \
+            --image "$IMAGE" --region "$REGION" --quiet \
+            --allow-unauthenticated \
+            --min-instances 0 --max-instances 4 \
+            --cpu 1 --memory 512Mi --concurrency 40 --timeout 120 \
+            --set-env-vars ENVIRONMENT=production \
+            --set-secrets \
+DATABASE_URL=database-url:latest,\
+TOKEN_ENCRYPTION_KEY=token-encryption-key:latest,\
+ANTHROPIC_API_KEY=anthropic-api-key:latest,\
+OPENAI_API_KEY=openai-api-key:latest,\
+GOOGLE_CLIENT_SECRET=google-client-secret:latest,\
+MICROSOFT_CLIENT_SECRET=microsoft-client-secret:latest
+
+      - name: Smoke test the new revision
+        run: |
+          URL=$(gcloud run services describe ${SERVICE} --region "$REGION" --format='value(status.url)')
+          curl -fsS --retry 5 --retry-delay 3 "$URL/api/health" | tee /dev/stderr | grep -q '"status":"ok"'
