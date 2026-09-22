@@ -45,6 +45,7 @@ jobs:
         run: |
           gcloud run jobs deploy ${SERVICE}-migrate \
             --image "$IMAGE" --region "$REGION" --quiet \
+            --service-account "clinic-runtime@${{ secrets.GCP_PROJECT }}.iam.gserviceaccount.com" \
             --set-secrets MIGRATION_DATABASE_URL=migration-database-url:latest \
             --command alembic --args upgrade,head
           gcloud run jobs execute ${SERVICE}-migrate --region "$REGION" --wait
@@ -63,6 +64,7 @@ jobs:
             --allow-unauthenticated \
             --min-instances 0 --max-instances 4 \
             --cpu 1 --memory 512Mi --concurrency 40 --timeout 120 \
+            --service-account "clinic-runtime@${{ secrets.GCP_PROJECT }}.iam.gserviceaccount.com" \
             --set-env-vars ENVIRONMENT=production \
             --set-secrets "$SECRETS"
 
