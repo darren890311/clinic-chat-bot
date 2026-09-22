@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.calendar_routes import router as calendar_router
 from app.api.routes import router
 from app.config import get_settings
 
@@ -27,6 +28,7 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(calendar_router)
 
 # The built frontend ships inside the same container and is served from the same
 # origin. One deploy target, no CORS in production, no second domain to certify.

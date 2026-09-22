@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     microsoft_tenant_id: str = "common"
     oauth_redirect_base: str = "http://localhost:8000"
 
+    # Shared secret guarding the calendar-connection endpoints. There is no
+    # staff login yet, and an unauthenticated endpoint that starts an OAuth flow
+    # is an invitation to attach someone else's calendar to this clinic.
+    admin_token: str = ""
+
     default_clinic_slug: str = "darren-dental"
     hold_ttl_seconds: int = 300
     freebusy_cache_seconds: int = 60

@@ -36,7 +36,13 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-filterwarnings = ["error::DeprecationWarning"]
+filterwarnings = [
+    # Our own deprecations should fail the build.
+    "error::DeprecationWarning",
+    # Starlette's TestClient reaches for an anyio alias that anyio has since
+    # deprecated. Not ours to fix, and not worth losing the strict rule over.
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100

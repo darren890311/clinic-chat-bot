@@ -48,3 +48,32 @@ def decrypt(ciphertext: bytes) -> str:
         raise TokenEncryptionUnavailable(
             "stored token could not be decrypted with the current key"
         ) from exc
+
+
+def sign_state(payload: dict) -> str:
+    """Seal an OAuth `state` value.
+
+    The state parameter is what ties a consent redirect back to the request that
+    started it. Unsigned, an attacker can forge one and have a practitioner's
+    authorisation attached to a practitioner of the attacker's choosing.
+
+    Fernet gives authentication and an expiry in one step, so a state cannot be
+    tampered with and cannot be replayed days later.
+    """
+    import json
+
+    # Decoded to str: this value travels in a URL query parameter.
+    return encrypt(json.dumps(payload, separators=(",", ":"))).decode()
+
+
+def verify_state(state: str, *, max_age_seconds: int = 600) -> dict:
+    """Open a sealed state, rejecting anything forged or stale."""
+    import json
+
+    from cryptography.fernet import InvalidToken
+
+    try:
+        raw = _cipher().decrypt(state.encode(), ttl=max_age_seconds)
+    except InvalidToken as exc:
+        raise TokenEncryptionUnavailable("oauth state was invalid or expired") from exc
+    return json.loads(raw.decode())
