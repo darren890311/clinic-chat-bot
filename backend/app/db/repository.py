@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import time
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import models
@@ -77,28 +77,27 @@ async def load_schedules(
     *,
     window: Interval,
     service_code: str | None = None,
+    exclude_appointment_id: uuid.UUID | None = None,
 ) -> list[PractitionerSchedule]:
     """Practitioners plus every block of time they are already committed for.
 
-    Internal bookings only. External calendar busy is layered on by the booking
-    service, which fetches it live per request; see `merge_external_busy`.
+    Internal bookings only. The booking service layers external calendar busy on
+    top, fetched live per request.
     """
     stmt = select(models.Practitioner).where(models.Practitioner.is_active.is_(True))
     if service_code:
         stmt = stmt.where(models.Practitioner.service_codes.any(service_code))
     practitioners = list((await session.execute(stmt)).scalars())
 
-    appointments = list(
-        (
-            await session.execute(
-                select(models.Appointment).where(
-                    models.Appointment.status.in_(OCCUPYING),
-                    models.Appointment.ends_at > window.start,
-                    models.Appointment.starts_at < window.end,
-                )
-            )
-        ).scalars()
+    occupied = select(models.Appointment).where(
+        models.Appointment.status.in_(OCCUPYING),
+        models.Appointment.ends_at > window.start,
+        models.Appointment.starts_at < window.end,
     )
+    if exclude_appointment_id is not None:
+        # Confirming a hold must not treat that hold as a conflict with itself.
+        occupied = occupied.where(models.Appointment.id != exclude_appointment_id)
+    appointments = list((await session.execute(occupied)).scalars())
 
     busy_by_practitioner: dict[uuid.UUID, list[Interval]] = {}
     for appt in appointments:
@@ -132,9 +131,125 @@ async def expire_stale_holds(session: AsyncSession) -> int:
     would lock the slot until someone noticed.
     """
     result = await session.execute(
-        text(
-            "UPDATE appointments SET status = 'expired'"
-            " WHERE status = 'held' AND hold_expires_at < now()"
+        update(models.Appointment)
+        .where(
+            models.Appointment.status == "held",
+            models.Appointment.hold_expires_at < func.now(),
         )
+        .values(status="expired")
+        # A bulk UPDATE bypasses the identity map, so an Appointment already
+        # loaded in this session would keep reporting itself as held. Fetching
+        # the affected rows keeps the in-memory objects honest.
+        .execution_options(synchronize_session="fetch")
     )
     return result.rowcount or 0
+
+
+async def get_practitioner(session: AsyncSession, *, slug: str) -> models.Practitioner | None:
+    return (
+        await session.execute(
+            select(models.Practitioner).where(
+                models.Practitioner.slug == slug,
+                models.Practitioner.is_active.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def get_practitioner_by_id(
+    session: AsyncSession, practitioner_id: uuid.UUID
+) -> models.Practitioner | None:
+    return await session.get(models.Practitioner, practitioner_id)
+
+
+async def upsert_patient(
+    session: AsyncSession,
+    clinic_id: uuid.UUID,
+    *,
+    full_name: str,
+    phone: str,
+    email: str | None,
+) -> models.Patient:
+    """Match an existing patient on phone number, otherwise create one.
+
+    Phone is the practical key for a clinic taking bookings by voice: it is what
+    the patient reliably knows and what reception already uses to find them.
+    """
+    existing = (
+        await session.execute(select(models.Patient).where(models.Patient.phone == phone))
+    ).scalar_one_or_none()
+
+    if existing is not None:
+        existing.full_name = full_name or existing.full_name
+        if email:
+            existing.email = email
+        return existing
+
+    patient = models.Patient(clinic_id=clinic_id, full_name=full_name, phone=phone, email=email)
+    session.add(patient)
+    await session.flush()
+    return patient
+
+
+async def get_appointment(
+    session: AsyncSession, appointment_id: uuid.UUID
+) -> models.Appointment | None:
+    return (
+        await session.execute(
+            select(models.Appointment).where(models.Appointment.id == appointment_id)
+        )
+    ).scalar_one_or_none()
+
+
+async def find_by_idempotency_key(session: AsyncSession, *, key: str) -> models.Appointment | None:
+    return (
+        await session.execute(
+            select(models.Appointment).where(models.Appointment.idempotency_key == key)
+        )
+    ).scalar_one_or_none()
+
+
+async def load_calendar_accounts(
+    session: AsyncSession, *, practitioner_id: uuid.UUID
+) -> list[models.CalendarAccount]:
+    """Connected calendars for one practitioner, ignoring any that need reconnecting."""
+    return list(
+        (
+            await session.execute(
+                select(models.CalendarAccount).where(
+                    models.CalendarAccount.practitioner_id == practitioner_id,
+                    models.CalendarAccount.invalidated_at.is_(None),
+                )
+            )
+        ).scalars()
+    )
+
+
+async def record_audit(
+    session: AsyncSession,
+    clinic_id: uuid.UUID,
+    *,
+    actor: str,
+    action: str,
+    entity_type: str,
+    entity_id: uuid.UUID | None = None,
+    detail: dict | None = None,
+) -> None:
+    """Append to the audit trail.
+
+    The application role holds INSERT and SELECT on this table and nothing else,
+    so a bug cannot rewrite history here even if it tries.
+    """
+    session.add(
+        models.AuditLog(
+            clinic_id=clinic_id,
+            actor=actor,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            detail=detail or {},
+        )
+    )
+    # Flush immediately so the row exists at the point the action happened,
+    # rather than whenever the surrounding transaction happens to flush next.
+    await session.flush()
