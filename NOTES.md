@@ -618,25 +618,44 @@ the practical exposure is wherever a URL or a log line could carry it. It is
 not persisted in the browser, which is why a refresh starts a new conversation
 and the patient has to identify themselves again.
 
-**A phone number is not a secret, and it can be enumerated.** This is the real
-hole, and it is worse than "somebody might know your number". There is no rate
-limiting anywhere in the application — grep for it; there is none — so nothing
-stops a caller working through a range of numbers, one chat turn each, and
-learning for every hit that this person has an appointment at this practice,
-when, and with which dentist, then cancelling it.
+**A phone number is not a secret.** Whoever can say a number gets that
+number's appointments — when, with which dentist — and can cancel them. There
+is no second factor and no second question.
+
+The risk is targeted, not mass. An earlier draft of this section said the
+number space could be enumerated, which does not survive arithmetic: a mobile
+number here is 09 plus eight digits, and at roughly a cent per probe — a
+booking conversation costs about six — walking the space costs the practice
+seven figures to find a few hundred patients. Nobody does that. Somebody who
+already has one specific number, on the other hand, spends one cent and gets
+everything the system knows about that patient.
+
+The absence of rate limiting is still a hole; it is just a different one. Each
+probe is a model call the practice pays for, so anyone can spend the clinic's
+money at will. That is a cost attack, not a disclosure, and it is the cheaper
+reason to add throttling.
+
+**This risk is not new, and that is the argument.** Ring any dental practice,
+give a name and a number, and the receptionist tells you the appointment and
+cancels it if asked. The threat model is the one the clinic already lives
+with. What changes is scale and attention: a receptionist can be talked round
+once per phone call and may notice something odd about the third attempt; an
+endpoint answers in parallel and notices nothing.
 
 Two fixes at very different prices, and the cheap one is not the real one.
+Throttling — per IP and per number, with a cap on consecutive misses — is a
+middleware, and it addresses the cost attack and makes probing tedious. A
+one-time code sent to the number before anything is disclosed is the actual
+answer.
 
-Throttling the lookup — per IP and per number, with a cap on consecutive
-misses — costs a middleware and makes enumeration impractical rather than
-impossible. It does not stop somebody who already knows the number.
-
-Sending a one-time code to the number before disclosing anything is the actual
-answer, and it is the reason SMS being out of scope is a security decision
-rather than a feature decision. Worth saying in those terms: the deliverable
-is not missing SMS reminders, it is accepting an unauthenticated identifier
-for read and cancel access, deliberately and with the consequence written
-down.
+Which is what makes SMS being out of scope a security decision and not a
+feature decision. Listed among the things not built, it reads as missing
+reminders. But SMS is also the only channel here that can verify a phone
+number, so dropping it decides that nothing authenticates a patient at all.
+The honest sentence is not "we did not build SMS". It is "read and cancel
+access rests on an unverified identifier, the exposure is that a named person
+has a dental appointment on Thursday, the practice's phone line has the same
+property today, and closing it needs a one-time code".
 
 What the system does do is limit what there is to take. Patients are contact
 details only — name, phone, email, no clinical information of any kind — so
