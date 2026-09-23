@@ -132,9 +132,10 @@ class CalendarAccount(Base):
 class Patient(Base):
     """Deliberately minimal: contact details only, never clinical information.
 
-    Keeping treatment history out of this system keeps it clear of HIPAA-regulated
-    protected health information. Service codes on an appointment are the only
-    hint of clinical intent, and they are not diagnoses.
+    This is what bounds a leak. Nothing authenticates a patient, so the worst
+    thing anyone can learn from this table is that a named person has a dental
+    appointment. Service codes on an appointment are the only hint of clinical
+    intent, and they are not diagnoses.
     """
 
     __tablename__ = "patients"

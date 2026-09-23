@@ -213,7 +213,11 @@ document as the scaling path rather than silently dropping them:
 
 ## Patient data
 
-Contact details only — name, phone, email. **No clinical information**, which
-keeps the system clear of HIPAA-regulated protected health information. Service
+Contact details only — name, phone, email. **No clinical information.** Service
 codes on an appointment are not diagnoses. Do not add fields that change this
 without saying so explicitly.
+
+This is what bounds a leak. Nothing in here authenticates a patient, so the
+worst disclosure has to stay at "this named person has a dental appointment on
+Thursday" — no history, no diagnoses, no notes. Adding a field is adding to
+that sentence.
