@@ -28,8 +28,43 @@ const playing = ref(false)
 let recorder: MediaRecorder | null = null
 let chunks: Blob[] = []
 let ticker: number | undefined
-let audio: HTMLAudioElement | null = null
 let objectUrl: string | null = null
+
+/**
+ * One audio element, unlocked by a user gesture, reused for every reply.
+ *
+ * Safari will not play audio from an element that has never been started by a
+ * gesture, and it counts the element rather than the page. Building a fresh
+ * `new Audio()` for each reply therefore worked in Chrome and silently did
+ * nothing in Safari: the recognised text appeared, the written reply appeared,
+ * and the patient heard nothing.
+ *
+ * It cannot be fixed at playback time either. By then the turn has been
+ * through recognition, the assistant and synthesis, and several seconds of
+ * awaiting have passed since the button was pressed. So the element is primed
+ * during the press itself, with a fraction of a second of silence, and then
+ * only has its source swapped afterwards.
+ */
+const audio = new Audio()
+let unlocked = false
+
+// 44 bytes: a WAV header describing no samples at all.
+const SILENCE =
+  'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA='
+
+function unlock() {
+  if (unlocked) return
+  unlocked = true
+  audio.src = SILENCE
+  audio.play().then(
+    () => audio.pause(),
+    () => {
+      // Refused anyway. The written reply is always on screen, so the turn is
+      // not lost; the patient simply reads instead of listening.
+      unlocked = false
+    },
+  )
+}
 
 // A patient thinking out loud is not a transcription bill. Sixty seconds is
 // far longer than anyone spends saying which afternoon suits them.
@@ -44,6 +79,8 @@ function pickMimeType(): string | undefined {
 }
 
 async function start() {
+  // The press is the gesture. Everything after it is too late for Safari.
+  unlock()
   stopPlayback()
   let stream: MediaStream
   try {
@@ -136,7 +173,7 @@ async function speakReply(text: string) {
   if (!blob || muted.value) return
 
   objectUrl = URL.createObjectURL(blob)
-  audio = new Audio(objectUrl)
+  audio.src = objectUrl
   audio.onended = stopPlayback
   audio.onerror = stopPlayback
   playing.value = true
@@ -151,12 +188,9 @@ async function speakReply(text: string) {
  * fastest way to lose a patient is to make them listen to the whole list.
  */
 function stopPlayback() {
-  if (audio) {
-    audio.pause()
-    audio.onended = null
-    audio.onerror = null
-    audio = null
-  }
+  audio.pause()
+  audio.onended = null
+  audio.onerror = null
   if (objectUrl) {
     URL.revokeObjectURL(objectUrl)
     objectUrl = null
