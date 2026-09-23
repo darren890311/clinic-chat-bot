@@ -29,8 +29,13 @@ class Settings(BaseSettings):
     # hands over. A booking needs three or four; a loop needs stopping.
     agent_max_tool_rounds: int = 8
 
+    # Recogniser and voice swap independently: a practice might want a cheap
+    # transcriber and a good-sounding voice, or the reverse.
     stt_provider: str = "openai"
     tts_provider: str = "openai"
+    stt_model: str = "gpt-4o-transcribe"
+    tts_model: str = "gpt-4o-mini-tts"
+    tts_voice: str = "alloy"
 
     # Fernet key protecting OAuth refresh tokens at rest.
     token_encryption_key: str = ""

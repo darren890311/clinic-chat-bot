@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import ConfirmationCard from './components/ConfirmationCard.vue'
+import VoiceControls from './components/VoiceControls.vue'
 import {
   formatWhen,
   getClinic,
+  getVoiceStatus,
   listBookings,
   listServices,
   sendMessage,
@@ -34,6 +36,9 @@ const provider = ref('')
 const model = ref('')
 const cachedTokens = ref(0)
 
+const voice = ref<InstanceType<typeof VoiceControls> | null>(null)
+const voiceAvailable = ref(false)
+
 const log = ref<HTMLElement | null>(null)
 const canSend = computed(() => draft.value.trim().length > 0 && !sending.value && !escalated.value)
 const urgent = computed(() => escalationReason.value === 'urgent_symptoms')
@@ -58,7 +63,7 @@ async function scroll() {
 watch(turns, scroll, { deep: true })
 watch(hold, scroll)
 
-async function send(text?: string) {
+async function send(text?: string, spoken = false) {
   const message = (text ?? draft.value).trim()
   if (!message || sending.value || escalated.value) return
   draft.value = ''
@@ -67,7 +72,7 @@ async function send(text?: string) {
   error.value = ''
 
   try {
-    const reply = await sendMessage(message, conversationId.value)
+    const reply = await sendMessage(message, conversationId.value, spoken ? 'voice' : 'chat')
     conversationId.value = reply.conversation_id
     turns.value.push({ role: 'assistant', text: reply.reply })
     hold.value = reply.pending_hold
@@ -78,6 +83,10 @@ async function send(text?: string) {
     cachedTokens.value = reply.cached_tokens
 
     bookings.value = reply.booked
+
+    // Spoken in, spoken out. A patient who typed is not read aloud to; a
+    // patient who spoke gets the reply both ways, never only as audio.
+    if (spoken) void voice.value?.speakReply(reply.reply)
   } catch (e) {
     error.value = (e as Error).message
   } finally {
@@ -98,7 +107,13 @@ async function send(text?: string) {
  * would put words in their mouth and spend a model call on something the
  * server already knows.
  */
+function onVoice(text: string) {
+  void send(text, true)
+}
+
 async function onBooked() {
+  // Whatever the assistant was saying is now out of date.
+  voice.value?.stopPlayback()
   hold.value = null
   await refreshBookings()
 }
@@ -114,7 +129,12 @@ async function refreshBookings() {
 
 onMounted(async () => {
   try {
-    const [clinic, list] = await Promise.all([getClinic(), listServices()])
+    const [clinic, list, voiceStatus] = await Promise.all([
+      getClinic(),
+      listServices(),
+      getVoiceStatus().catch(() => ({ available: false, stt: '', tts: '' })),
+    ])
+    voiceAvailable.value = voiceStatus.available
     clinicName.value = clinic.name
     contactPhone.value = clinic.contact_phone
     setClinicTimeZone(clinic.timezone)
@@ -190,6 +210,13 @@ onMounted(async () => {
       </span>
       <span v-else>Someone will follow up with you.</span>
     </div>
+
+    <VoiceControls
+      v-if="voiceAvailable && !escalated"
+      ref="voice"
+      @submit="onVoice"
+      @error="error = $event"
+    />
 
     <form class="composer" @submit.prevent="send()">
       <input

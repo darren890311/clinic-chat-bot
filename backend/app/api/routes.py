@@ -3,7 +3,8 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.agent import Agent
@@ -16,6 +17,7 @@ from app.domain.intervals import Interval
 from app.domain.scheduling import compute_availability
 from app.providers.calendar import CalendarError, registered_providers
 from app.providers.llm import registered_providers as llm_providers
+from app.providers.voice import SpeechError, get_stt, get_tts
 from app.services import booking
 
 router = APIRouter(prefix="/api")
@@ -503,4 +505,95 @@ async def chat(
         cached_tokens=reply.usage.cache_read_tokens,
         pending_hold=pending,
         booked=booked,
+    )
+
+
+# --- voice ------------------------------------------------------------------
+#
+# Two endpoints rather than one, deliberately. A single "send audio, get audio"
+# call would be fewer round trips and would hide the step the voice contract
+# exists to protect: the patient has to see what was heard before it is acted
+# on. Recognition returns text to the client, the client shows it and sends it
+# to /api/chat like any typed message, and synthesis is a separate request for
+# the reply.
+#
+# It also means the agent has no idea a turn was spoken. Speech reaches the
+# booking logic by exactly the path typing does, so nothing asserted about the
+# chat path has to be asserted again here.
+
+
+class VoiceStatus(BaseModel):
+    available: bool
+    stt: str
+    tts: str
+
+
+class Transcribed(BaseModel):
+    text: str
+    provider: str
+    model: str
+
+
+class SpeakRequest(BaseModel):
+    # Long enough for any reply the brief asks for ("two or three sentences"),
+    # short enough that a pasted essay cannot be turned into an audio bill.
+    text: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/voice", response_model=VoiceStatus)
+async def voice_status() -> VoiceStatus:
+    """Whether the microphone button should be offered at all.
+
+    Without a key the adapters would raise on first use, which is a button
+    that looks live and is not. The client asks first and hides it instead.
+    """
+    configured = bool(settings.openai_api_key)
+    return VoiceStatus(
+        available=configured or settings.stt_provider == "null",
+        stt=settings.stt_provider,
+        tts=settings.tts_provider,
+    )
+
+
+@router.post("/voice/transcribe", response_model=Transcribed)
+async def transcribe(audio: UploadFile = File(...)) -> Transcribed:
+    """What was heard. Nothing is sent to the agent from here."""
+    data = await audio.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="That recording was empty.")
+
+    try:
+        result = await get_stt(settings.stt_provider).transcribe(
+            data, media_type=audio.content_type or "audio/webm"
+        )
+    except SpeechError as exc:
+        # 503 when saying it again would plausibly work, 400 when it would
+        # not. The client offers the keyboard on a 400 rather than inviting
+        # the patient to repeat themselves into the same failure.
+        raise HTTPException(
+            status_code=503 if exc.retryable else 400,
+            detail=(
+                "I did not catch that — try again."
+                if exc.retryable
+                else "I could not make out that recording. You can type it instead."
+            ),
+        ) from exc
+
+    return Transcribed(text=result.text, provider=result.provider, model=result.model)
+
+
+@router.post("/voice/speak")
+async def speak(body: SpeakRequest) -> Response:
+    """The reply as audio. The same text is always shown as well."""
+    try:
+        result = await get_tts(settings.tts_provider).speak(body.text)
+    except SpeechError as exc:
+        # Losing the audio is not losing the turn: the reply is already on
+        # screen. The client plays nothing and says nothing about it.
+        raise HTTPException(status_code=503, detail="Audio is unavailable right now.") from exc
+
+    return Response(
+        content=result.audio,
+        media_type=result.media_type,
+        headers={"Cache-Control": "no-store"},
     )

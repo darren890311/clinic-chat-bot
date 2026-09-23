@@ -79,10 +79,16 @@ export const listServices = () => request<Service[]>('/api/services')
 export const listBookings = (conversationId: string) =>
   request<BookedAppointment[]>(`/api/conversations/${conversationId}/bookings`)
 
-export const sendMessage = (message: string, conversationId: string | null) =>
+export const sendMessage = (
+  message: string,
+  conversationId: string | null,
+  channel: 'chat' | 'voice' = 'chat',
+) =>
   request<ChatReply>('/api/chat', {
     method: 'POST',
-    body: JSON.stringify({ message, conversation_id: conversationId, channel: 'chat' }),
+    // Recorded so the practice can see which conversations were spoken. The
+    // agent is not told: a voice turn is the same text through the same loop.
+    body: JSON.stringify({ message, conversation_id: conversationId, channel }),
   })
 
 export const confirmBooking = (
@@ -130,4 +136,50 @@ export function formatTime(iso: string): string {
     hour12: true,
     timeZone: clinicTimeZone,
   })
+}
+
+export type VoiceStatus = {
+  available: boolean
+  stt: string
+  tts: string
+}
+
+export const getVoiceStatus = () => request<VoiceStatus>('/api/voice')
+
+/**
+ * What was heard — returned to the caller, never sent onward from here.
+ *
+ * The patient sees it and decides. Speech is lossy and cannot be re-read, so
+ * acting on a transcript the patient has not seen is acting on a guess.
+ */
+export async function transcribe(audio: Blob): Promise<string> {
+  const form = new FormData()
+  // The extension matters: the recogniser infers the container from it.
+  const extension = audio.type.includes('mp4') ? 'mp4' : audio.type.includes('ogg') ? 'ogg' : 'webm'
+  form.append('audio', audio, `speech.${extension}`)
+
+  const response = await fetch('/api/voice/transcribe', { method: 'POST', body: form })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.detail ?? 'I could not make out that recording.')
+  return body.text as string
+}
+
+/**
+ * The reply as audio.
+ *
+ * Returns null rather than throwing when synthesis fails: the reply is
+ * already on screen, so losing the audio is not losing the turn and there is
+ * nothing useful to tell the patient about it.
+ */
+export async function speak(text: string): Promise<Blob | null> {
+  try {
+    const response = await fetch('/api/voice/speak', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+    return response.ok ? await response.blob() : null
+  } catch {
+    return null
+  }
 }

@@ -112,6 +112,21 @@ re-read:
   a mistake is least recoverable — a wrong number means a patient who cannot be
   reached. The name is editable on the confirmation card for the same reason.
 
+Shaped as two endpoints — `POST /api/voice/transcribe` and
+`POST /api/voice/speak` — rather than one that takes audio and returns audio.
+A single call would be fewer round trips and would hide the step the contract
+exists to protect: the transcript goes to the client, the patient sees and may
+edit it, and it then reaches `/api/chat` as an ordinary message. So the agent
+is never told a turn was spoken. Speech reaches the booking logic by exactly
+the path typing does, which is why nothing asserted about the chat path has to
+be asserted again for voice.
+
+`STT_PROVIDER` and `TTS_PROVIDER` are separate settings: recognition and
+synthesis are separate purchases, and a practice may want a cheap transcriber
+with a good-sounding voice. Both fall back to `null`, which turns the
+microphone button off rather than offering one that fails when pressed —
+`GET /api/voice` is what the client asks first.
+
 4. **A tool refuses an appointment the conversation was never given.** Three
    take an appointment id — cancel, and both halves of a move. Row level
    security keeps an id inside its own clinic; within one, `_in_scope` in
