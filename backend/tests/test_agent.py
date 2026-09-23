@@ -1001,9 +1001,124 @@ async def test_the_brief_sends_ordinary_pain_to_a_booking_not_a_hospital(session
     provider = ScriptedProvider([says("ok")])
     await Agent(provider).respond(session, CLINIC, text="My tooth hurts", now=NOW)
 
-    prompt = provider.seen_system
-    assert "Severe pain" in prompt and "ordinary dental work" in prompt
+    prompt = provider.seen_system.lower()
+    assert "severe pain" in prompt and "ordinary dental work" in prompt
     assert "search from today rather than next week" in prompt
+    # Offering the earliest slot without saying why reads as reading out the
+    # next free time. A patient in pain should be told they were moved up.
+    assert "say why" in prompt
+
+
+async def test_the_tool_result_carries_the_urgent_instruction_not_the_brief(
+    session,
+) -> None:
+    """Where an instruction sits decides whether it survives.
+
+    The brief already said to tell a patient with a knocked-out tooth to ring
+    the practice. Measured against the real model it produced that sentence
+    once in five attempts, and a longer, firmer wording produced it none in
+    five. The instruction was not being ignored so much as buried: by the time
+    the model writes its reply, the nearest thing in its context is a list of
+    times, and a list of times is what it reports.
+
+    So it is said in the tool result instead, which is the last thing read
+    before the reply is written. The phone number is also on screen at all
+    times, which is the half that does not depend on the model.
+    """
+    provider = ScriptedProvider(
+        [
+            calls(
+                "find_availability",
+                service_code="A",
+                practitioner_slug=None,
+                earliest=None,
+                days=1,
+                urgent_symptom="his front tooth came out completely",
+            ),
+            says("Ring the practice now. The earliest is 9 AM."),
+        ]
+    )
+    await Agent(provider).respond(session, CLINIC, text="his tooth came out", now=NOW)
+
+    result = next(
+        m for m in provider.seen_transcripts[-1] if getattr(m, "role", None) == "tool"
+    ).content
+
+    # Before any time is mentioned, and carrying the number to ring.
+    assert result.startswith("URGENT")
+    assert "+1 555 0100" in result
+    assert result.index("ring the practice") < result.index("Start times")
+
+
+async def test_the_reply_carries_the_urgent_flag_whatever_the_model_said(
+    session,
+) -> None:
+    """The banner is driven by the classification, not by the wording.
+
+    Measured against the real model over six attempts, it set the flag six
+    times and included the instruction to ring in five. So the screen shows the
+    number on the strength of the flag. Here the model says nothing about
+    ringing at all and the flag still reaches the client.
+    """
+    provider = ScriptedProvider(
+        [
+            calls(
+                "find_availability",
+                service_code="A",
+                practitioner_slug=None,
+                earliest=None,
+                days=1,
+                urgent_symptom="his tooth came out",
+            ),
+            says("The earliest today is 9:00 AM. Shall I hold it?"),
+        ]
+    )
+    reply = await Agent(provider).respond(session, CLINIC, text="his tooth came out", now=NOW)
+
+    assert "ring" not in reply.text.lower(), "the model said nothing; that is the point"
+    assert reply.urgent_symptom is True
+
+
+async def test_an_ordinary_booking_raises_no_alarm(session) -> None:
+    """A banner that appears for a cleaning is a banner nobody reads."""
+    provider = ScriptedProvider(
+        [
+            calls(
+                "find_availability",
+                service_code="A",
+                practitioner_slug=None,
+                earliest=None,
+                days=7,
+            ),
+            says("Thursday at 9 ?"),
+        ]
+    )
+    reply = await Agent(provider).respond(session, CLINIC, text="a cleaning", now=NOW)
+    assert reply.urgent_symptom is False
+
+
+async def test_availability_without_the_urgent_flag_says_nothing_about_ringing(
+    session,
+) -> None:
+    """Ordinary bookings must not carry an emergency instruction."""
+    provider = ScriptedProvider(
+        [
+            calls(
+                "find_availability",
+                service_code="A",
+                practitioner_slug=None,
+                earliest=None,
+                days=1,
+            ),
+            says("Here are some times."),
+        ]
+    )
+    await Agent(provider).respond(session, CLINIC, text="a cleaning please", now=NOW)
+
+    result = next(
+        m for m in provider.seen_transcripts[-1] if getattr(m, "role", None) == "tool"
+    ).content
+    assert "URGENT" not in result
 
 
 async def test_a_knocked_out_tooth_is_not_sent_to_a_hospital(session) -> None:

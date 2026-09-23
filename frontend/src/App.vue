@@ -17,6 +17,22 @@ import {
 
 type Turn = { role: 'patient' | 'assistant'; text: string }
 
+/**
+ * Strip the emphasis the model occasionally adds.
+ *
+ * Replies are rendered as plain text, so a model that decides to write
+ * **9:00 AM this morning** puts literal asterisks in front of a patient. It
+ * does this in maybe one reply in ten, which is exactly often enough to be
+ * seen and too rare to notice while building. Asking it not to would work most
+ * of the time; removing them works every time.
+ */
+function plain(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+}
+
 const clinicName = ref('')
 const contactPhone = ref<string | null>(null)
 const services = ref<Service[]>([])
@@ -74,7 +90,7 @@ async function send(text?: string, spoken = false) {
   try {
     const reply = await sendMessage(message, conversationId.value, spoken ? 'voice' : 'chat')
     conversationId.value = reply.conversation_id
-    turns.value.push({ role: 'assistant', text: reply.reply })
+    turns.value.push({ role: 'assistant', text: plain(reply.reply) })
     hold.value = reply.pending_hold
     escalated.value = reply.escalated
     escalationReason.value = reply.escalation_reason
@@ -156,6 +172,9 @@ onMounted(async () => {
         <h1>{{ clinicName || 'Loading…' }}</h1>
         <p class="sub">Book an appointment</p>
       </div>
+      <p v-if="contactPhone" class="urgent-line">
+        In an emergency, call <strong>{{ contactPhone }}</strong>
+      </p>
       <p v-if="provider" class="engine">
         {{ provider }} · {{ model }}
         <span v-if="cachedTokens" class="cache">{{ cachedTokens }} cached</span>
@@ -256,6 +275,20 @@ h1 {
   margin: 2px 0 0;
   color: var(--muted);
   font-size: 0.9rem;
+}
+/* Always on screen, whatever the assistant happens to say.
+   The number is the one thing on this page that has to be there when somebody
+   has knocked a tooth out, and the model offered it in two conversations out
+   of three. Two out of three is not a safety instruction. */
+.urgent-line {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: right;
+}
+.urgent-line strong {
+  color: #a11;
+  font-variant-numeric: tabular-nums;
 }
 .engine {
   margin: 0;

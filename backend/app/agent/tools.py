@@ -106,6 +106,15 @@ DEFINITIONS: list[ToolDefinition] = [
                     "type": "integer",
                     "description": "How many days ahead to search. 14 is a sensible default.",
                 },
+                "urgent_symptom": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "If the patient has just described a knocked-out or "
+                        "pushed-out adult tooth, put their own words here. "
+                        "Null otherwise. Passing this changes what you must "
+                        "say when you report the times back."
+                    ),
+                },
                 "moving_appointment_id": {
                     "type": ["string", "null"],
                     "description": (
@@ -121,6 +130,7 @@ DEFINITIONS: list[ToolDefinition] = [
                 "practitioner_slug",
                 "earliest",
                 "days",
+                "urgent_symptom",
                 "moving_appointment_id",
             ],
         },
@@ -285,6 +295,12 @@ async def _list_services(_: dict[str, Any], ctx: ToolContext) -> str:
     return "\n".join(lines)
 
 
+async def _contact_phone(ctx: ToolContext) -> str:
+    """The number a patient should ring. Falls back to a phrase, never blank."""
+    clinic = await ctx.session.get(models.Clinic, ctx.clinic_id)
+    return (clinic.contact_phone if clinic else None) or "the practice's main number"
+
+
 async def _in_scope(ctx: ToolContext, appointment_id: uuid.UUID) -> bool:
     """Whether this conversation was ever legitimately given this appointment.
 
@@ -395,7 +411,24 @@ async def _find_availability(args: dict[str, Any], ctx: ToolContext) -> str:
     shown = list(grouped.items())[:MAX_DAYS_SHOWN]
     appearing = sorted({slot.practitioner_slug for slot in slots})
 
-    lines = [f"{service.name}, {service.duration_minutes} minutes."]
+    lines = []
+    if args.get("urgent_symptom"):
+        # Placed at the top of the tool result, not in the brief.
+        #
+        # The brief already says to tell them to ring. Measured against the
+        # real model it produced that sentence once in five, and a longer,
+        # firmer wording produced it none in five. The instruction was not
+        # being ignored so much as buried: by the time the model writes its
+        # reply the nearest thing in its context is a list of times, and a
+        # list of times is what it reports. Saying it here puts it in the last
+        # thing read rather than the first.
+        lines.append(
+            f"URGENT: the patient has described a knocked-out tooth. Before "
+            f"you mention any of these times, tell them to ring the practice "
+            f"on {await _contact_phone(ctx)} right now. Then offer the earliest."
+        )
+
+    lines.append(f"{service.name}, {service.duration_minutes} minutes.")
     if len(appearing) == 1:
         slug = appearing[0]
         lines.append(f"All of these are with {names.get(slug, slug)} ({slug}). Start times:")

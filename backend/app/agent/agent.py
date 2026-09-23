@@ -70,6 +70,13 @@ class AgentReply:
     escalated: bool = False
     escalation_reason: str | None = None
     tools_used: list[str] = field(default_factory=list)
+    # Set when the model flagged a knocked-out tooth while searching. The
+    # interface shows the number to ring on the strength of this, rather than
+    # on the strength of the model remembering to say it. Measured against the
+    # real model, the flag was set 6 times out of 6 and the sentence appeared
+    # in 4: the classification is reliable, the wording is not, so the reliable
+    # half drives what the patient sees.
+    urgent_symptom: bool = False
     usage: Usage = field(default_factory=Usage)
     provider: str = ""
     model: str = ""
@@ -149,6 +156,7 @@ class Agent:
         )
 
         used: list[str] = []
+        urgent = False
         usage = Usage()
 
         for _ in range(settings.agent_max_tool_rounds):
@@ -178,6 +186,7 @@ class Agent:
                     model=self.provider.model,
                     usage=usage,
                     tools_used=used,
+                    urgent_symptom=urgent,
                 )
 
             usage = usage + completion.usage
@@ -190,6 +199,7 @@ class Agent:
                     text=self._refusal_text(completion),
                     used=used,
                     usage=usage,
+                    urgent_symptom=urgent,
                 )
 
             if not completion.wants_tools:
@@ -200,6 +210,7 @@ class Agent:
                     text=completion.text or ESCALATED,
                     used=used,
                     usage=usage,
+                    urgent_symptom=urgent,
                 )
 
             transcript.append(
@@ -223,6 +234,8 @@ class Agent:
 
             for call in completion.tool_calls:
                 used.append(call.name)
+                if call.arguments.get("urgent_symptom"):
+                    urgent = True
                 result = await self._run_tool(call, tool_context)
                 transcript.append(Message(role="tool", content=result, tool_call_id=call.id))
                 await repo.append_message(
@@ -276,6 +289,7 @@ class Agent:
         used: list[str],
         usage: Usage,
         escalated: bool = False,
+        urgent_symptom: bool = False,
     ) -> AgentReply:
         await repo.append_message(
             session, clinic_id, conversation_id=conversation.id, role="assistant", content=text
@@ -291,6 +305,7 @@ class Agent:
             escalated=escalated or handed_over,
             escalation_reason=conversation.escalation_reason,
             tools_used=used,
+            urgent_symptom=urgent_symptom,
             usage=usage,
             provider=self.provider.name,
             model=self.provider.model,

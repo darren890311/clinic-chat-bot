@@ -375,6 +375,10 @@ class ChatReply(BaseModel):
     reply: str
     escalated: bool = False
     escalation_reason: str | None = None
+    # True when the model flagged a knocked-out tooth while searching. The
+    # client shows the number to ring on the strength of this rather than on
+    # the strength of the reply happening to contain it.
+    urgent_symptom: bool = False
     tools_used: list[str] = Field(default_factory=list)
     provider: str
     model: str
@@ -497,6 +501,7 @@ async def chat(
         reply=reply.text,
         escalated=reply.escalated,
         escalation_reason=reply.escalation_reason,
+        urgent_symptom=reply.urgent_symptom,
         tools_used=reply.tools_used,
         provider=reply.provider,
         model=reply.model,
