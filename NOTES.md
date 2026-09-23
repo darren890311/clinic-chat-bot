@@ -131,6 +131,34 @@ configuration, in `gcloud run services describe` output, and in the deployment
 logs. They are read from Secret Manager with `--set-secrets` instead, and the
 runtime identity holds `secretAccessor` on exactly those seven secrets.
 
+### The speech key is the one long-lived credential left
+
+Everything else the system talks to is reached without a standing secret.
+Deploys use Workload Identity Federation, so there is no service account key
+in CI at all; Cloud Run holds its own identity and reads the runtime secrets
+from Secret Manager. Speech broke the pattern: OpenAI issues an API key and
+there is nothing else to present.
+
+What can be done about that is bounded in two directions rather than one. The
+key is restricted to the audio endpoints, so a leak does not reach the
+account's other capabilities, and it carries a 30-day expiry, so it does not
+outlive the assignment. Neither is a substitute for not having a key.
+
+Google Cloud Speech would remove it entirely — Cloud Run authenticates with
+the service account it already runs as, exactly as it does for everything
+else in the project. It was not chosen because it costs a second SDK pair, an
+`initdb`-style local auth dance and an hour that the two documents need more.
+That is a schedule decision, not an architectural one, which is the reason
+the ports exist: `SpeechToText` and `TextToSpeech` are satisfied by one class
+each, so moving is a new adapter and an environment variable rather than a
+change anywhere above them.
+
+Worth stating in those terms rather than as "we used OpenAI for speech". The
+question an interviewer is actually asking is whether the credential posture
+was decided or inherited, and the honest answer here is that one deliberate
+exception was made to a rule the rest of the system follows, with the blast
+radius narrowed in both scope and time, and the exit already built.
+
 ---
 
 ## Correctness
