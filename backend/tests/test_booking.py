@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.db import models
+from app.db import repository as repo
 from app.domain import errors
 from app.domain.intervals import Interval
 from app.providers.calendar import CalendarError, ExternalEvent, register
@@ -521,3 +522,162 @@ async def test_availability_reflects_holds_taken_so_far(session) -> None:
 
     assert len(after) < len(before)
     assert all(s.start != _monday(9) for s in after)
+
+
+async def test_a_lost_race_leaves_the_session_usable() -> None:
+    """A constraint violation must not close the surrounding transaction.
+
+    This test opens its own session with `async with session.begin()`, exactly
+    as `tenant_session` does per request, because that is what makes the bug
+    visible. When a flush fails, SQLAlchemy rolls back — and with no savepoint
+    that rollback closes the outer `begin()` block, so every later statement in
+    the request raises "Can't operate on closed transaction" with an error that
+    names neither the slot nor the constraint.
+
+    In production the crash landed several steps away: the agent caught the
+    SlotUnavailable, returned a polite message to the model, and then died
+    writing the transcript.
+
+    Losing a race is an ordinary event in a booking conversation. The rest of
+    the turn has to survive it.
+    """
+    engine = create_async_engine(_async_url(APP_URL), poolclass=NullPool)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    clinic = uuid.uuid4()
+
+    try:
+        async with factory() as s, s.begin():
+            await s.execute(
+                text("SELECT set_config('app.clinic_id', :c, true)"), {"c": str(clinic)}
+            )
+            practitioner_id = uuid.uuid4()
+            s.add(
+                models.Clinic(
+                    id=clinic,
+                    slug=f"race-{clinic.hex[:8]}",
+                    name="Race Dental",
+                    timezone="America/New_York",
+                    scheduling_policy={},
+                )
+            )
+            s.add(
+                models.Service(
+                    clinic_id=clinic,
+                    code="A",
+                    name="Routine Cleaning",
+                    duration_minutes=60,
+                    description="",
+                )
+            )
+            s.add(
+                models.Practitioner(
+                    id=practitioner_id,
+                    clinic_id=clinic,
+                    slug="dr-race",
+                    name="Dr. Race",
+                    title="Dentist",
+                    seniority="senior",
+                    service_codes=["A"],
+                    working_windows=WINDOWS,
+                )
+            )
+            await s.flush()
+
+            await booking.create_hold(
+                s, clinic, service_code="A", practitioner_slug="dr-race", starts_at=_monday(9)
+            )
+            with pytest.raises(errors.SlotUnavailable):
+                await booking.create_hold(
+                    s, clinic, service_code="A", practitioner_slug="dr-race", starts_at=_monday(9)
+                )
+
+            # The transaction is still alive: the turn can carry on and offer
+            # something else.
+            later = await booking.create_hold(
+                s, clinic, service_code="A", practitioner_slug="dr-race", starts_at=_monday(11)
+            )
+            assert later.status == "held"
+
+            await s.rollback()
+    finally:
+        await engine.dispose()
+
+
+async def test_an_appointment_can_move_to_an_overlapping_time(session) -> None:
+    """The case the exclusion constraint made impossible.
+
+    Moving 09:00 to 09:30 was rejected by the database after the engine had
+    approved it: the engine can be told to ignore the appointment being given
+    up, Postgres cannot. The old appointment now steps aside in the same
+    transaction as the new hold.
+    """
+    first = await booking.create_hold(
+        session, CLINIC, service_code="A", practitioner_slug="dr-senior", starts_at=_monday(9)
+    )
+    booked = await booking.confirm_appointment(session, CLINIC, hold_id=first.id, patient=PATIENT)
+
+    moved = await booking.create_hold(
+        session,
+        CLINIC,
+        service_code="A",
+        practitioner_slug="dr-senior",
+        starts_at=_monday(9, 30),
+        replaces_appointment_id=booked.id,
+    )
+    assert moved.status == "held"
+    await session.refresh(booked)
+    assert booked.status == "superseded", "the old slot must free up for its replacement"
+
+    await booking.confirm_appointment(session, CLINIC, hold_id=moved.id, patient=PATIENT)
+    await session.refresh(booked)
+    assert booked.status == "cancelled"
+    await session.refresh(moved)
+    assert moved.status == "confirmed"
+
+
+async def test_an_abandoned_move_gives_the_original_appointment_back(session) -> None:
+    """A patient who walks away mid-move must still have what they arrived with."""
+    first = await booking.create_hold(
+        session, CLINIC, service_code="A", practitioner_slug="dr-senior", starts_at=_monday(9)
+    )
+    booked = await booking.confirm_appointment(session, CLINIC, hold_id=first.id, patient=PATIENT)
+    moved = await booking.create_hold(
+        session,
+        CLINIC,
+        service_code="A",
+        practitioner_slug="dr-senior",
+        starts_at=_monday(9, 30),
+        replaces_appointment_id=booked.id,
+    )
+
+    await session.execute(
+        text("UPDATE appointments SET hold_expires_at = now() - interval '1 minute' WHERE id = :i"),
+        {"i": moved.id},
+    )
+    await repo.expire_stale_holds(session)
+
+    await session.refresh(booked)
+    await session.refresh(moved)
+    assert moved.status == "expired"
+    assert booked.status == "confirmed", "the original appointment has to come back"
+
+
+async def test_a_failed_move_leaves_the_original_untouched(session) -> None:
+    """If the new time cannot be held, nothing is given up."""
+    first = await booking.create_hold(
+        session, CLINIC, service_code="A", practitioner_slug="dr-senior", starts_at=_monday(9)
+    )
+    booked = await booking.confirm_appointment(session, CLINIC, hold_id=first.id, patient=PATIENT)
+
+    with pytest.raises(errors.SlotUnavailable):
+        await booking.create_hold(
+            session,
+            CLINIC,
+            service_code="A",
+            practitioner_slug="dr-senior",
+            starts_at=_monday(19),  # outside working hours
+            replaces_appointment_id=booked.id,
+        )
+
+    await session.refresh(booked)
+    assert booked.status == "confirmed"

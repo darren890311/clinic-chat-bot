@@ -21,7 +21,6 @@ Three independent defences against double booking, in the order they fire:
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
 import uuid
 from dataclasses import dataclass
@@ -68,12 +67,18 @@ async def find_availability(
     search: Interval,
     practitioner_slug: str | None = None,
     limit: int = 20,
+    moving_appointment_id: uuid.UUID | None = None,
     now: datetime | None = None,
 ) -> tuple[Service, list[Slot]]:
     """Slots where `service_code` can actually be delivered.
 
     Includes external calendar busy, so what is offered has already been checked
     against the practitioners' own diaries.
+
+    `moving_appointment_id` is the appointment the patient intends to give up.
+    Without it, someone moving a 9:00 booking to 9:30 is blocked by their own
+    9:00 booking, and the assistant tells them a slot they already own is
+    unavailable.
     """
     now = now or datetime.now(UTC)
     service, policy, schedules = await _context(
@@ -82,6 +87,7 @@ async def find_availability(
         service_code=service_code,
         window=search,
         practitioner_slug=practitioner_slug,
+        exclude_appointment_id=moving_appointment_id,
     )
     slots = compute_availability(
         service=service,
@@ -123,6 +129,8 @@ async def create_hold(
         service_code=service_code,
         practitioner_slug=practitioner_slug,
         starts_at=starts_at,
+        # The appointment being given up must not block the one replacing it.
+        exclude_appointment_id=replaces_appointment_id,
     )
 
     slot = Slot(
@@ -149,8 +157,26 @@ async def create_hold(
         conversation_id=conversation_id,
         replaces_appointment_id=replaces_appointment_id,
     )
+    # The appointment being given up steps aside first, in this transaction.
+    # Otherwise the exclusion constraint rejects a move to an adjacent time:
+    # the engine can be told to ignore it, Postgres cannot. If the hold expires
+    # unconfirmed, the sweep puts it back.
+    superseded = None
+    if replaces_appointment_id:
+        superseded = await repo.get_appointment(session, replaces_appointment_id)
+        if superseded is not None and superseded.status == "confirmed":
+            superseded.status = "superseded"
+            await session.flush()
+
     session.add(hold)
-    await _flush_or_conflict(session, slot)
+    try:
+        await _flush_or_conflict(session, slot, pending=hold)
+    except errors.SlotUnavailable:
+        # The move failed; the patient keeps what they had.
+        if superseded is not None and superseded.status == "superseded":
+            superseded.status = "confirmed"
+            await session.flush()
+        raise
 
     await repo.record_audit(
         session,
@@ -234,7 +260,7 @@ async def confirm_appointment(
     hold.patient_id = patient_row.id
     hold.idempotency_key = idempotency_key
     hold.notes = patient.notes
-    await _flush_or_conflict(session, slot)
+    await _flush_or_conflict(session, slot, pending=hold)
 
     await repo.record_audit(
         session,
@@ -255,14 +281,21 @@ async def confirm_appointment(
     # released in the same transaction that books the new one, so the patient
     # is never left holding both or neither.
     if hold.replaces_appointment_id:
-        # Already gone is fine; the move still stands.
-        with contextlib.suppress(errors.AppointmentNotFound):
-            await cancel_appointment(
+        replaced = await repo.get_appointment(session, hold.replaces_appointment_id)
+        if replaced is not None and replaced.status in ("superseded", "confirmed"):
+            # It stepped aside when the hold was made; this makes it permanent.
+            await calendar_sync.withdraw_appointment(session, appointment=replaced)
+            replaced.status = "cancelled"
+            replaced.google_event_id = None
+            replaced.microsoft_event_id = None
+            await repo.record_audit(
                 session,
                 clinic_id,
-                appointment_id=hold.replaces_appointment_id,
-                reason="rescheduled",
                 actor="bot",
+                action="appointment.cancelled",
+                entity_type="appointment",
+                entity_id=replaced.id,
+                detail={"reason": "rescheduled", "replaced_by": str(hold.id)},
             )
 
     # The booking now exists. Mirroring runs afterwards and never raises: a
@@ -325,16 +358,31 @@ async def cancel_appointment(
 # --- internals -------------------------------------------------------------
 
 
-async def _flush_or_conflict(session: AsyncSession, slot: Slot) -> None:
+async def _flush_or_conflict(
+    session: AsyncSession, slot: Slot, pending: models.Appointment | None = None
+) -> None:
     """Push the write to the database and translate an overlap into a domain error.
 
     This is the defence that actually holds when two conversations confirm the
     same slot in the same instant: both pass their engine checks, and Postgres
     rejects the second.
+
+    The write goes inside a savepoint. A constraint violation puts the whole
+    Postgres transaction into an aborted state, where every later statement
+    fails — so translating the error into a friendly "that time has gone" and
+    carrying on would leave the caller with a dead session and a crash several
+    steps later, far from the cause. A losing race is an ordinary event in a
+    booking conversation and the turn has to survive it.
     """
     try:
-        await session.flush()
+        async with session.begin_nested():
+            await session.flush()
     except IntegrityError as exc:
+        # The savepoint is rolled back, but the rejected row is still pending in
+        # the session's unit of work and the next flush would try it again. It
+        # has to be expunged or the failure follows the request around.
+        if pending is not None:
+            session.expunge(pending)
         if OVERLAP_CONSTRAINT in str(exc.orig):
             raise errors.SlotUnavailable(
                 "Someone just booked that time. Let me find you another."

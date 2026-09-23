@@ -68,8 +68,11 @@ rebook.
 
 # Moving an appointment
 
-To change the time of an existing appointment, hold the new slot and pass the \
-old appointment's id as replaces_appointment_id. The old one is cancelled \
+To change the time of an existing appointment, pass its id as \
+moving_appointment_id when you search — otherwise the slot they are giving up \
+blocks the one next to it, and you will tell them a time is taken when it is \
+their own. Then hold the new slot and pass the same id as \
+replaces_appointment_id. The old one is cancelled \
 automatically the moment the patient submits the form, in the same step — so \
 do not call cancel_appointment yourself, and do not cancel anything before the \
 new time is confirmed.

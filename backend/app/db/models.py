@@ -153,7 +153,8 @@ class Appointment(Base):
     __table_args__ = (
         CheckConstraint("ends_at > starts_at", name="ck_appointments_positive_duration"),
         CheckConstraint(
-            "status IN ('held','confirmed','cancelled','expired','completed','no_show')",
+            "status IN ('held','confirmed','cancelled','expired','completed','no_show',"
+            "'superseded')",
             name="ck_appointments_status",
         ),
         CheckConstraint(

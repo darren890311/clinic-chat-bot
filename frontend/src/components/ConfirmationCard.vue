@@ -11,16 +11,10 @@
  * nobody can reach.
  */
 import { computed, onUnmounted, ref, watch } from 'vue'
-import {
-  confirmBooking,
-  formatTime,
-  formatWhen,
-  type BookedAppointment,
-  type PendingHold,
-} from '../api'
+import { confirmBooking, formatTime, formatWhen, type PendingHold } from '../api'
 
 const props = defineProps<{ hold: PendingHold }>()
-const emit = defineEmits<{ booked: [booking: BookedAppointment & { patient_name: string; patient_phone: string }]; expired: [] }>()
+const emit = defineEmits<{ booked: []; expired: [] }>()
 
 const fullName = ref('')
 const phone = ref('')
@@ -66,21 +60,14 @@ async function submit() {
   submitting.value = true
   error.value = ''
   try {
-    const appointment = await confirmBooking(props.hold.hold_id, {
+    await confirmBooking(props.hold.hold_id, {
       full_name: fullName.value.trim(),
       phone: phone.value.trim(),
       email: email.value.trim() || null,
     })
-    emit('booked', {
-      appointment_id: appointment.appointment_id,
-      service_name: props.hold.service_name,
-      practitioner_name: appointment.practitioner_name,
-      starts_at: appointment.starts_at,
-      ends_at: appointment.ends_at,
-      // Echoed back so the patient can check what was recorded against them.
-      patient_name: fullName.value.trim(),
-      patient_phone: phone.value.trim(),
-    })
+    // The parent re-reads the booking list from the server. Constructing it
+    // here left a replaced appointment on screen beside its replacement.
+    emit('booked')
   } catch (e) {
     error.value = (e as Error).message
   } finally {

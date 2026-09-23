@@ -9,7 +9,8 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, time
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import models
@@ -130,19 +131,58 @@ async def expire_stale_holds(session: AsyncSession) -> int:
     before the exclusion constraint is consulted, or a patient who hesitated
     would lock the slot until someone noticed.
     """
-    result = await session.execute(
-        update(models.Appointment)
-        .where(
-            models.Appointment.status == "held",
-            models.Appointment.hold_expires_at < func.now(),
-        )
-        .values(status="expired")
-        # A bulk UPDATE bypasses the identity map, so an Appointment already
-        # loaded in this session would keep reporting itself as held. Fetching
-        # the affected rows keeps the in-memory objects honest.
-        .execution_options(synchronize_session="fetch")
+    stale = list(
+        (
+            await session.execute(
+                select(models.Appointment).where(
+                    models.Appointment.status == "held",
+                    models.Appointment.hold_expires_at < func.now(),
+                )
+            )
+        ).scalars()
     )
-    return result.rowcount or 0
+    if not stale:
+        return 0
+
+    for hold in stale:
+        hold.status = "expired"
+
+    # Flushed before any restore. SQLAlchemy batches UPDATEs and does not
+    # guarantee the order between them; with both pending it issued the restore
+    # first, while the hold still occupied the slot, and the exclusion
+    # constraint rejected the pair. The slot has to be released before anything
+    # can move back into it.
+    await session.flush()
+
+    # A move that was never confirmed has to leave the patient where they
+    # started. The appointment that stepped aside when the hold was made comes
+    # back, unless someone else has since taken its slot — in which case the
+    # exclusion constraint refuses and it stays superseded for staff to see.
+    for hold in stale:
+        if not hold.replaces_appointment_id:
+            continue
+        replaced = await session.get(models.Appointment, hold.replaces_appointment_id)
+        if replaced is None or replaced.status != "superseded":
+            continue
+        replaced.status = "confirmed"
+        try:
+            async with session.begin_nested():
+                await session.flush()
+        except IntegrityError:
+            replaced.status = "superseded"
+            session.add(
+                models.AuditLog(
+                    clinic_id=replaced.clinic_id,
+                    actor="system",
+                    action="appointment.restore_failed",
+                    entity_type="appointment",
+                    entity_id=replaced.id,
+                    detail={"reason": "slot taken while the move was pending"},
+                )
+            )
+
+    await session.flush()
+    return len(stale)
 
 
 async def get_practitioner(session: AsyncSession, *, slug: str) -> models.Practitioner | None:

@@ -104,8 +104,23 @@ DEFINITIONS: list[ToolDefinition] = [
                     "type": "integer",
                     "description": "How many days ahead to search. 14 is a sensible default.",
                 },
+                "moving_appointment_id": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "When the patient is moving an existing appointment, its "
+                        "id. That appointment is then ignored when working out "
+                        "what is free, so they are not blocked by the slot they "
+                        "are giving up. Null otherwise."
+                    ),
+                },
             },
-            "required": ["service_code", "practitioner_slug", "earliest", "days"],
+            "required": [
+                "service_code",
+                "practitioner_slug",
+                "earliest",
+                "days",
+                "moving_appointment_id",
+            ],
         },
     ),
     ToolDefinition(
@@ -270,6 +285,12 @@ async def _find_availability(args: dict[str, Any], ctx: ToolContext) -> str:
     if earliest < ctx.now:
         earliest = ctx.now
 
+    moving = args.get("moving_appointment_id")
+    try:
+        moving_id = uuid.UUID(str(moving)) if moving else None
+    except ValueError:
+        return "That appointment reference is not valid."
+
     service, slots = await booking.find_availability(
         ctx.session,
         ctx.clinic_id,
@@ -277,6 +298,7 @@ async def _find_availability(args: dict[str, Any], ctx: ToolContext) -> str:
         search=Interval(earliest, earliest + timedelta(days=days)),
         practitioner_slug=args.get("practitioner_slug") or None,
         limit=MAX_SLOTS,
+        moving_appointment_id=moving_id,
         now=ctx.now,
     )
 

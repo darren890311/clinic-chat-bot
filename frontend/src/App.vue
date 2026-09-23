@@ -4,6 +4,7 @@ import ConfirmationCard from './components/ConfirmationCard.vue'
 import {
   formatWhen,
   getClinic,
+  listBookings,
   listServices,
   sendMessage,
   setClinicTimeZone,
@@ -13,7 +14,6 @@ import {
 } from './api'
 
 type Turn = { role: 'patient' | 'assistant'; text: string }
-type Booking = BookedAppointment & { patient_name?: string; patient_phone?: string }
 
 const clinicName = ref('')
 const contactPhone = ref<string | null>(null)
@@ -26,7 +26,7 @@ const error = ref('')
 
 const conversationId = ref<string | null>(null)
 const hold = ref<PendingHold | null>(null)
-const bookings = ref<Booking[]>([])
+const bookings = ref<BookedAppointment[]>([])
 const escalated = ref(false)
 const escalationReason = ref<string | null>(null)
 
@@ -77,11 +77,7 @@ async function send(text?: string) {
     model.value = reply.model
     cachedTokens.value = reply.cached_tokens
 
-    // Keep any patient details already shown against a booking we know about.
-    bookings.value = reply.booked.map((b) => ({
-      ...b,
-      ...bookings.value.find((known) => known.appointment_id === b.appointment_id),
-    }))
+    bookings.value = reply.booked
   } catch (e) {
     error.value = (e as Error).message
   } finally {
@@ -92,15 +88,28 @@ async function send(text?: string) {
 /**
  * The card booked it.
  *
- * Nothing is sent to the assistant here. It learns about the booking from the
- * server on the patient's next message, because the appointment is in the
- * database and the turn context reads it from there. Faking a patient message
- * to tell it would put words in their mouth and cost a model call to say
- * something the server already knows.
+ * The list is re-read from the server rather than patched locally. Merging the
+ * new appointment into what was already on screen left a replaced booking
+ * sitting beside its replacement after a reschedule, and kept showing a name
+ * that had since been corrected.
+ *
+ * Nothing is sent to the assistant. It learns about the booking from the turn
+ * context, which reads the same database. Faking a patient message to tell it
+ * would put words in their mouth and spend a model call on something the
+ * server already knows.
  */
-function onBooked(booking: Booking) {
+async function onBooked() {
   hold.value = null
-  bookings.value = [...bookings.value.filter((b) => b.appointment_id !== booking.appointment_id), booking]
+  await refreshBookings()
+}
+
+async function refreshBookings() {
+  if (!conversationId.value) return
+  try {
+    bookings.value = await listBookings(conversationId.value)
+  } catch {
+    // Leave what is on screen; the next reply will correct it.
+  }
 }
 
 onMounted(async () => {
@@ -159,8 +168,8 @@ onMounted(async () => {
         <dl>
           <div><dt>With</dt><dd>{{ b.practitioner_name }}</dd></div>
           <div><dt>When</dt><dd>{{ formatWhen(b.starts_at) }}</dd></div>
-          <!-- Shown back so the patient can see what was recorded, and tell us
-               if a name or number was typed wrong. -->
+          <!-- What the practice has recorded, not what was typed here, so a
+               correction made in conversation is visible immediately. -->
           <div v-if="b.patient_name"><dt>Name</dt><dd>{{ b.patient_name }}</dd></div>
           <div v-if="b.patient_phone"><dt>Phone</dt><dd>{{ b.patient_phone }}</dd></div>
         </dl>

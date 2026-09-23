@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.agent import Agent
 from app.config import get_settings
+from app.db import models
 from app.db import repository as repo
 from app.db.session import tenant_session, unscoped_session
 from app.domain import errors
@@ -82,8 +83,6 @@ async def health() -> dict[str, object]:
 @router.get("/clinic", response_model=ClinicOut)
 async def clinic_info(clinic_id: uuid.UUID = Depends(current_clinic_id)) -> ClinicOut:
     async with tenant_session(clinic_id) as session:
-        from app.db import models
-
         clinic = await session.get(models.Clinic, clinic_id)
     if clinic is None:
         raise HTTPException(status_code=404, detail="Clinic not found")
@@ -353,11 +352,20 @@ class PendingHold(BaseModel):
 
 
 class BookedAppointment(BaseModel):
+    """A confirmed appointment, as the practice has it recorded.
+
+    The patient's name and phone come from the database rather than from what
+    the client remembers typing, so a correction made in conversation shows up
+    on the card the patient is being asked to check.
+    """
+
     appointment_id: uuid.UUID
     service_name: str
     practitioner_name: str
     starts_at: datetime
     ends_at: datetime
+    patient_name: str | None = None
+    patient_phone: str | None = None
 
 
 class ChatReply(BaseModel):
@@ -374,6 +382,45 @@ class ChatReply(BaseModel):
     # Read back from the database after the turn, not reported by the model.
     pending_hold: PendingHold | None = None
     booked: list[BookedAppointment] = Field(default_factory=list)
+
+
+@router.get("/conversations/{conversation_id}/bookings", response_model=list[BookedAppointment])
+async def conversation_bookings(
+    conversation_id: uuid.UUID,
+    clinic_id: uuid.UUID = Depends(current_clinic_id),
+) -> list[BookedAppointment]:
+    """What this conversation currently has booked.
+
+    Exists so the client never keeps its own copy. It guessed before: after a
+    reschedule it showed the replaced appointment alongside its replacement,
+    and after a name correction it kept showing the name that had been
+    corrected.
+    """
+    async with tenant_session(clinic_id) as session:
+        services = await repo.load_services(session, clinic_id)
+        out = []
+        for appointment in await repo.confirmed_for_conversation(
+            session, conversation_id=conversation_id
+        ):
+            practitioner = await repo.get_practitioner_by_id(session, appointment.practitioner_id)
+            patient = (
+                await session.get(models.Patient, appointment.patient_id)
+                if appointment.patient_id
+                else None
+            )
+            service = services.get(appointment.service_code)
+            out.append(
+                BookedAppointment(
+                    appointment_id=appointment.id,
+                    service_name=service.name if service else appointment.service_code,
+                    practitioner_name=practitioner.name if practitioner else "",
+                    starts_at=appointment.starts_at,
+                    ends_at=appointment.ends_at,
+                    patient_name=patient.full_name if patient else None,
+                    patient_phone=patient.phone if patient else None,
+                )
+            )
+    return out
 
 
 @router.post("/chat", response_model=ChatReply)
@@ -426,6 +473,11 @@ async def chat(
         ):
             practitioner = await repo.get_practitioner_by_id(session, appointment.practitioner_id)
             service = services.get(appointment.service_code)
+            patient = (
+                await session.get(models.Patient, appointment.patient_id)
+                if appointment.patient_id
+                else None
+            )
             booked.append(
                 BookedAppointment(
                     appointment_id=appointment.id,
@@ -433,6 +485,8 @@ async def chat(
                     practitioner_name=practitioner.name if practitioner else "",
                     starts_at=appointment.starts_at,
                     ends_at=appointment.ends_at,
+                    patient_name=patient.full_name if patient else None,
+                    patient_phone=patient.phone if patient else None,
                 )
             )
 

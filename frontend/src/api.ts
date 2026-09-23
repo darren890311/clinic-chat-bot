@@ -27,6 +27,10 @@ export type BookedAppointment = {
   practitioner_name: string
   starts_at: string
   ends_at: string
+  // From the database, not from what was typed into the card. A name corrected
+  // in conversation has to show up on the card the patient is asked to check.
+  patient_name: string | null
+  patient_phone: string | null
 }
 
 export type ChatReply = {
@@ -71,6 +75,9 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export const getClinic = () => request<Clinic>('/api/clinic')
 
 export const listServices = () => request<Service[]>('/api/services')
+
+export const listBookings = (conversationId: string) =>
+  request<BookedAppointment[]>(`/api/conversations/${conversationId}/bookings`)
 
 export const sendMessage = (message: string, conversationId: string | null) =>
   request<ChatReply>('/api/chat', {

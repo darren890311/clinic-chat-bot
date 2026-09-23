@@ -601,6 +601,43 @@ spent a model call to say something the server already knew, and still left the
 model guessing. State the system owns belongs in the context, not in a fake
 turn.
 
+### The engine could be told to ignore an appointment; the constraint could not
+
+Moving an appointment to an adjacent time — 09:00 to 09:30 — failed. The
+scheduling engine was given the id of the appointment being given up and
+correctly excluded it, so it offered 09:30. Postgres then rejected the insert:
+to an exclusion constraint, 09:00–10:00 and 09:30–10:30 simply overlap, and it
+has no idea one is replacing the other.
+
+The assistant relayed that as *"the system won't release your 9:00 to free up
+9:30"*, which is an accurate description of a design flaw and no use to a
+patient.
+
+A receptionist moving an appointment does not cancel and rebook; she changes
+the time. The equivalent here is a `superseded` state: the old appointment
+steps aside in the same transaction that creates the new hold, so it no longer
+occupies the slot, and the hold sweep puts it back if the move is never
+confirmed. A patient who walks away mid-move still has what they arrived with.
+
+Three smaller things surfaced underneath it.
+
+**A rejected insert stays pending.** Translating the constraint violation into
+`SlotUnavailable` left the failed row in the session's unit of work, so the
+next flush retried it and the request died several steps later with an error
+that named neither the slot nor the constraint. The write is now inside a
+savepoint and the rejected row is expunged.
+
+**SQLAlchemy batches UPDATEs and does not order them for you.** Restoring the
+superseded appointment while the expiring hold was still marked `held` put both
+updates in one flush, and the restore was issued first — straight into the slot
+the hold had not yet released. The expiry is flushed before anything moves back.
+
+**The client was keeping its own copy of the truth.** After a reschedule it
+showed the replaced appointment beside its replacement, and after a name
+correction it kept showing the name that had been corrected, because the
+booking cards were assembled from what the browser remembered submitting. They
+are read from the server now, patient details included.
+
 ### The interface promised something the assistant could not do
 
 The confirmation card ends with *"If anything here is wrong, tell me below and
