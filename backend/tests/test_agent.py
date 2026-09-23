@@ -463,6 +463,152 @@ async def test_an_escalated_conversation_does_not_go_back_to_the_model(session) 
     ).scalar_one() == 0
 
 
+async def _someone_elses_appointment(session) -> models.Appointment:
+    """A confirmed booking made in a conversation that is not ours."""
+    patient = models.Patient(
+        id=uuid.uuid4(), clinic_id=CLINIC, full_name="Someone Else", phone="0900111222"
+    )
+    appointment = models.Appointment(
+        id=uuid.uuid4(),
+        clinic_id=CLINIC,
+        practitioner_id=SENIOR,
+        patient_id=patient.id,
+        service_code="A",
+        starts_at=monday(14),
+        ends_at=monday(15),
+        status="confirmed",
+        conversation_id=uuid.uuid4(),
+    )
+    # Flushed first: there is no ORM relationship between the two, so nothing
+    # orders the inserts and the appointment's patient_id goes in unbacked.
+    session.add(patient)
+    await session.flush()
+    session.add(appointment)
+    await session.flush()
+    return appointment
+
+
+async def test_a_conversation_cannot_cancel_an_appointment_it_was_never_given(
+    session,
+) -> None:
+    """An unguessable id is not a checked id.
+
+    Row level security keeps an appointment inside its own clinic. Within one,
+    nothing stopped a conversation cancelling a booking it had no connection
+    to. The realistic way that happens is not an attacker — it is a model
+    mis-copying or inventing a UUID.
+    """
+    other = await _someone_elses_appointment(session)
+
+    provider = ScriptedProvider(
+        [
+            calls("cancel_appointment", appointment_id=str(other.id)),
+            says("I could not find that booking."),
+        ]
+    )
+    await Agent(provider).respond(session, CLINIC, text="Cancel my appointment", now=NOW)
+
+    result = next(
+        m for m in provider.seen_transcripts[-1] if getattr(m, "role", None) == "tool"
+    ).content
+    assert "ask for the phone number" in result
+
+    await session.refresh(other)
+    assert other.status == "confirmed", "the booking must survive a call it did not authorise"
+
+
+async def test_the_refusal_does_not_reveal_that_the_appointment_exists(session) -> None:
+    """A distinct "you may not touch that" is an existence oracle.
+
+    Someone probing with ids would learn which ones are real. A missing
+    appointment and one belonging to another conversation get the same answer.
+    """
+    other = await _someone_elses_appointment(session)
+
+    provider = ScriptedProvider(
+        [
+            calls("cancel_appointment", appointment_id=str(other.id)),
+            calls("cancel_appointment", appointment_id=str(uuid.uuid4())),
+            says("I could not find that booking."),
+        ]
+    )
+    await Agent(provider).respond(session, CLINIC, text="Cancel it", now=NOW)
+
+    results = [
+        m.content for m in provider.seen_transcripts[-1] if getattr(m, "role", None) == "tool"
+    ]
+    assert len(results) == 2
+    assert results[0] == results[1]
+
+
+async def test_the_phone_number_the_patient_gives_brings_it_into_scope(session) -> None:
+    """The second honest route to an id: the patient identifies the booking.
+
+    A patient who closed the page and came back has no conversation holding
+    their appointment. Giving the number the booking was made under is how
+    they get it back — and it is exactly what a model inventing an id cannot
+    do.
+    """
+    other = await _someone_elses_appointment(session)
+
+    provider = ScriptedProvider(
+        [
+            calls("find_my_appointments", phone="0900111222"),
+            calls("cancel_appointment", appointment_id=str(other.id)),
+            says("Cancelled."),
+        ]
+    )
+    await Agent(provider).respond(session, CLINIC, text="I need to cancel", now=NOW)
+
+    await session.refresh(other)
+    assert other.status == "cancelled"
+
+
+async def test_a_move_cannot_be_aimed_at_an_appointment_out_of_scope(session) -> None:
+    """Both halves of a move take an id, so both are checked.
+
+    Only cancelling would leave the same booking reachable by rescheduling it
+    into the past, or onto a slot the patient never asked for.
+    """
+    other = await _someone_elses_appointment(session)
+
+    provider = ScriptedProvider(
+        [
+            calls(
+                "find_availability",
+                service_code="A",
+                practitioner_slug=None,
+                earliest=None,
+                days=7,
+                moving_appointment_id=str(other.id),
+            ),
+            calls(
+                "hold_slot",
+                service_code="A",
+                practitioner_slug="dr-hale",
+                starts_at=monday(9).isoformat(),
+                replaces_appointment_id=str(other.id),
+            ),
+            says("I could not find that booking."),
+        ]
+    )
+    await Agent(provider).respond(session, CLINIC, text="Move my appointment", now=NOW)
+
+    results = [
+        m.content for m in provider.seen_transcripts[-1] if getattr(m, "role", None) == "tool"
+    ]
+    assert all("ask for the phone number" in r for r in results)
+
+    await session.refresh(other)
+    assert other.status == "confirmed"
+
+    held = await session.execute(
+        text("SELECT count(*) FROM appointments WHERE clinic_id = :c AND status = 'held'"),
+        {"c": CLINIC},
+    )
+    assert held.scalar_one() == 0, "the replacement must not have been held either"
+
+
 # --- failure modes -----------------------------------------------------------
 
 

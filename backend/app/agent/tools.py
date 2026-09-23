@@ -30,6 +30,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import models
 from app.db import repository as repo
 from app.domain import errors
 from app.domain.intervals import Interval
@@ -272,6 +273,48 @@ async def _list_services(_: dict[str, Any], ctx: ToolContext) -> str:
     return "\n".join(lines)
 
 
+async def _in_scope(ctx: ToolContext, appointment_id: uuid.UUID) -> bool:
+    """Whether this conversation was ever legitimately given this appointment.
+
+    Three tools act on an appointment id: cancel, and the two halves of a move.
+    Row level security keeps an id inside its own clinic; within a clinic,
+    nothing stopped one conversation cancelling another's booking. The id is
+    unguessable, which is not the same as being checked.
+
+    There are two honest ways to have learned one — this conversation booked
+    it, or the patient gave a phone number and the lookup returned it — and
+    both are recorded. Anything else is a model that has invented or
+    mis-copied a UUID, which is the failure this actually guards against.
+
+    It is not authentication. The phone is whatever the patient said; nothing
+    sends a code to it. What it buys is that an id on its own is no longer
+    enough to act on.
+    """
+    appointment = await repo.get_appointment(ctx.session, appointment_id)
+    if appointment is None:
+        return False
+    if appointment.conversation_id == ctx.conversation_id:
+        return True
+
+    conversation = await ctx.session.get(models.Conversation, ctx.conversation_id)
+    phone = conversation.identified_phone if conversation else None
+    if not phone or appointment.patient_id is None:
+        return False
+
+    patient = await ctx.session.get(models.Patient, appointment.patient_id)
+    return patient is not None and patient.phone == phone
+
+
+# Said to the model, not to the patient. Deliberately the same answer as a
+# genuinely missing appointment: a distinct "you may not touch that" would
+# confirm the id exists to anyone probing with one.
+OUT_OF_SCOPE = (
+    "No such appointment is available in this conversation. If the patient has "
+    "a booking, ask for the phone number on it and call find_my_appointments "
+    "first."
+)
+
+
 async def _find_availability(args: dict[str, Any], ctx: ToolContext) -> str:
     """Every time that works, grouped by day, rather than the first few.
 
@@ -291,6 +334,8 @@ async def _find_availability(args: dict[str, Any], ctx: ToolContext) -> str:
         moving_id = uuid.UUID(str(moving)) if moving else None
     except ValueError:
         return "That appointment reference is not valid."
+    if moving_id is not None and not await _in_scope(ctx, moving_id):
+        return OUT_OF_SCOPE
 
     service, slots = await booking.find_availability(
         ctx.session,
@@ -385,6 +430,8 @@ async def _hold_slot(args: dict[str, Any], ctx: ToolContext) -> str:
         replaces_id = uuid.UUID(str(replaces)) if replaces else None
     except ValueError:
         return "That appointment reference is not valid."
+    if replaces_id is not None and not await _in_scope(ctx, replaces_id):
+        return OUT_OF_SCOPE
 
     try:
         hold = await booking.create_hold(
@@ -427,6 +474,16 @@ async def _find_my_appointments(args: dict[str, Any], ctx: ToolContext) -> str:
     if not appointments:
         return "No upcoming appointments are registered to that number."
 
+    # The patient has identified themselves with this number, so the ids about
+    # to be handed to the model become ones it may act on. Recorded on the
+    # conversation rather than inferred later from the transcript: an
+    # authorisation decision should not depend on parsing stored tool-call
+    # JSON back out again.
+    conversation = await ctx.session.get(models.Conversation, ctx.conversation_id)
+    if conversation is not None:
+        conversation.identified_phone = args["phone"]
+        await ctx.session.flush()
+
     services = await repo.load_services(ctx.session, ctx.clinic_id)
     names = {s.practitioner.slug: s.practitioner.name for s in await _schedules(ctx)}
     ids = await repo.practitioner_slugs_by_id(ctx.session, ctx.clinic_id)
@@ -448,6 +505,8 @@ async def _cancel_appointment(args: dict[str, Any], ctx: ToolContext) -> str:
         appointment_id = uuid.UUID(str(args["appointment_id"]))
     except ValueError:
         return "That appointment reference is not valid."
+    if not await _in_scope(ctx, appointment_id):
+        return OUT_OF_SCOPE
 
     appointment = await booking.cancel_appointment(
         ctx.session,

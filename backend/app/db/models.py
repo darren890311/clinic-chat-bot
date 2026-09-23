@@ -207,6 +207,11 @@ class Conversation(Base):
     llm_model: Mapped[str] = mapped_column(String(64), nullable=False)
     escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     escalation_reason: Mapped[str | None] = mapped_column(String(64))
+    # The number the patient identified themselves with, set when a lookup on
+    # it returned something. Not verified — nothing sends a code to it — but it
+    # is what lets the tools refuse an appointment id this conversation was
+    # never given. See migration a6d5e0000007.
+    identified_phone: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[datetime] = _created_at()
 
 

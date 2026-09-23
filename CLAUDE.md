@@ -53,13 +53,13 @@ submission.
    backends sit behind ports. Adding a calendar system means one class satisfying
    `CalendarProvider`; nothing in the engine, agent or API changes.
 
-4. **Nothing is booked on speech alone.** Speech recognition misreads names,
+5. **Nothing is booked on speech alone.** Speech recognition misreads names,
    dates and digits, and a booking has consequences. The agent may place a hold
    from a spoken agreement, but the appointment is only confirmed when the
    patient acts on a confirmation card they can read. See the voice contract
    below.
 
-5. **External calendars are read as well as written.** Free/busy is pulled into
+6. **External calendars are read as well as written.** Free/busy is pulled into
    the engine so the bot respects commitments it did not create; confirmed
    appointments are pushed back out as events. Our database remains the single
    source of truth for appointments — the calendars are a busy source and a
@@ -70,7 +70,7 @@ submission.
    knowing who a dentist is meeting, and untrusted calendar text never enters a
    model's context.
 
-6. **The cached prompt prefix must stay byte-identical.** Providers cache by
+7. **The cached prompt prefix must stay byte-identical.** Providers cache by
    prefix, so one changing character in the system prompt discards the cached
    work for everything after it. Nothing fails when a cache misses — there is
    no error, only a larger bill and a slower reply — so this cannot be caught
@@ -82,7 +82,7 @@ submission.
    `tests/test_agent.py` asserts the prompt is identical across two turns three
    hours apart; do not weaken it.
 
-7. **A conversation's order is data.** Messages of one agent turn are written in
+8. **A conversation's order is data.** Messages of one agent turn are written in
    a single transaction and share a `now()` timestamp, so they are ordered by
    `messages.seq`, an identity column. Ordering a transcript by `created_at`
    gives a scrambled conversation that providers reject.
@@ -111,6 +111,22 @@ re-read:
 - **Type the phone number.** Digits are where recognition fails most and where
   a mistake is least recoverable — a wrong number means a patient who cannot be
   reached. The name is editable on the confirmation card for the same reason.
+
+4. **A tool refuses an appointment the conversation was never given.** Three
+   take an appointment id — cancel, and both halves of a move. Row level
+   security keeps an id inside its own clinic; within one, `_in_scope` in
+   `app/agent/tools.py` requires that this conversation either booked it
+   (`appointments.conversation_id`) or looked it up by a phone number the
+   patient supplied (`conversations.identified_phone`).
+
+   This is not patient authentication — nothing verifies the number, and
+   anyone who knows it can still see and cancel those bookings. What it
+   protects against is a model inventing or mis-copying a UUID, which is the
+   realistic failure. Same argument as the missing confirm tool: the guardrail
+   is an absent capability, not an instruction.
+
+   The refusal is deliberately identical to the one for an appointment that
+   does not exist. A distinct "not yours" would confirm which ids are real.
 
 ## Row level security: the trap
 

@@ -601,6 +601,48 @@ spent a model call to say something the server already knew, and still left the
 model guessing. State the system owns belongs in the context, not in a fake
 turn.
 
+### An id that cannot be guessed is not an id that has been checked
+
+Testing what happens after a browser refresh turned up the honest answer —
+the patient gives the phone number on the booking, the assistant looks it up
+and moves it — and, underneath, a gap. Three tools take an appointment id:
+`cancel_appointment`, and both halves of a move (`moving_appointment_id` on the
+search, `replaces_appointment_id` on the hold). None of them checked whose
+appointment it was. Row level security keeps an id inside its own clinic, and
+within one clinic that was the only thing standing between a conversation and
+any other patient's booking.
+
+Not an open door: the id is a v4 UUID. But "unguessable" is a property of the
+id, not a decision anybody made, and the realistic way a wrong id arrives is
+not an attacker. It is the model mis-copying one out of a tool result, or
+inventing one because the shape looked right. Everything else in this system
+takes the position that the model's authority ends at the tool boundary; this
+was a place where it did not.
+
+There are exactly two honest ways for a conversation to hold an id: it booked
+the appointment, which `appointments.conversation_id` already recorded, or the
+patient gave the phone number it was booked under and the lookup returned it,
+which was recorded nowhere. `conversations.identified_phone` records the
+second, and `_in_scope` requires one of the two.
+
+Three things worth saying about it.
+
+**It is not authentication, and the column is not called `verified_phone`.**
+Nothing sends a code to the number; the patient says it and the lookup
+answers. Anyone who knows your number can still list and cancel your
+appointments. That gap needs SMS, which is out of scope, and it belongs in the
+internal document as a stated limitation rather than something this quietly
+appears to have solved.
+
+**The refusal is the same sentence as "no such appointment".** A distinct "that
+one is not yours" answers the question of whether the id is real, which is the
+only thing someone probing with ids wants to know.
+
+**The phone is stored, not re-derived.** It could have been recovered by
+reading back the `find_my_appointments` arguments from the stored tool calls.
+An authorisation decision that depends on parsing message JSON is one that
+breaks silently the day the message format moves.
+
 ### A true sentence that means something false
 
 Asked for a root canal, the assistant offered "today 12:30 PM with Dr. Hale,
