@@ -42,9 +42,12 @@ discuss insurance. If somebody describes swelling spreading towards the eye,
 difficulty breathing, or bleeding that will not stop, it stops booking, gives
 them your number, and tells them to ring you now.
 
-Severe toothache is treated as a reason to be seen quickly, not as a reason to
-send someone to hospital. It will search from today rather than next week and
-say why.
+Severe toothache on its own does not trigger any of that. The assistant treats
+it as a reason to be seen quickly: it searches from today rather than next
+week, and tells the patient that is what it is doing. It hands over to you only
+for the symptoms listed above, and for a knocked-out tooth, where it tells the
+patient to ring you immediately while it finds them the earliest slot there
+is.
 
 ### What it does not do
 
@@ -60,7 +63,24 @@ most of the volume, and hands anything unusual to you.
 ## What a patient sees
 
 They open the page and the assistant greets them. They can type, or press
-**Speak** and talk.
+**Speak** and talk. A typical booking takes four messages:
+
+> **Patient.** I'd like to book a cleaning.
+>
+> **Assistant.** Routine Cleaning takes an hour. The earliest today is 9:00 AM,
+> with Dr. Hale, Dr. Okafor or Dr. Ramos all free. 11:00 AM and 2:00 PM are
+> also open. Which suits you?
+>
+> **Patient.** 2pm with Dr Hale please.
+>
+> **Assistant.** Held: Routine Cleaning with Dr. Hale, today at 2:00 PM. A
+> confirmation form is on your screen. Check the details and fill it in to
+> complete the booking.
+
+That exchange is taken from the working assistant, not written for this guide.
+Notice that it names every dentist who is free at nine, rather than picking
+one. If two of your dentists can take a time, the patient is told so and
+chooses.
 
 If they speak, what the assistant heard appears in a box **before anything is
 done with it**. They can correct a misheard word and then send it. Replies are
@@ -79,9 +99,15 @@ mishears, and a wrong number is a patient nobody can reach.
 
 ## Setting it up
 
-There are two jobs. Someone sets up the practice once. Then each dentist
-connects their own calendar, which takes about two minutes each and can only be
-done by them.
+Three steps, in order:
+
+1. **Someone at the practice sends us the details.** Once, about ten minutes.
+2. **We set it up and send each dentist a link.** A day or so.
+3. **Each dentist opens their link and connects their own calendar.** About two
+   minutes each, and nobody can do it on their behalf.
+
+Patients can start booking after step 2. Step 3 adds each dentist's outside
+commitments, and can happen at any time afterwards.
 
 ### 1. The practice details
 
@@ -155,6 +181,9 @@ so those will need to stay off the assistant's diary another way.
 
 Connecting is per dentist and can be done at any time.
 
+One thing to plan for before you start: while the assistant is on trial, a
+Google connection has to be renewed weekly. The next section explains why.
+
 ### 3. While the assistant is on trial
 
 Two things behave differently until the practice commits and the application
@@ -190,8 +219,12 @@ releases itself. Nobody has to tidy up.
 unreachable. It will refuse to offer times rather than guess, which is
 deliberate, and it recovers by itself. If it persists, tell us.
 
-**A dentist's calendar stopped being respected.** Their connection has expired
-or been withdrawn. They open their link and approve again.
+**A dentist's calendar stopped being respected.** Almost always the weekly
+expiry described above. On a Google calendar during the trial period, the
+connection lasts seven days, so this will happen on a predictable day of the
+week until the review is complete. The dentist opens their link and approves
+again, which takes seconds. It can also mean the connection was withdrawn from
+the Google or Microsoft account directly.
 
 **A patient says a name or number is wrong.** They can tell the assistant in
 the conversation and it will correct the record on their booking. They do not
@@ -215,16 +248,17 @@ You should know the limit of that last one. It is the same check your
 receptionist makes on the telephone, and it has the same weakness: somebody who
 knows both could see when a patient is coming in, and could cancel it. We
 recommend adding a code sent by text message before the assistant is opened to
-the general public, and we have costed that work. Until it is in place, treat
-the assistant as you would your phone line.
+the general public. That work is estimated and priced in the technical document
+that accompanies this one. Until it is in place, treat the assistant as you
+would your phone line.
 
 ---
 
 ## What it costs to run
 
 At a realistic booking volume for a three-dentist practice, the running cost is
-roughly **55 to 110 US dollars a month**, most of it the artificial
-intelligence itself and the hosted database. It scales with the number of
+roughly **USD 55 to 110 a month**, most of it the artificial intelligence
+itself and the hosted database. It scales with the number of
 conversations rather than with the number of patients on your books, and it
 costs nothing when nobody is using it.
 
