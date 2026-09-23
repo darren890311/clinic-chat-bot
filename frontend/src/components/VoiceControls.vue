@@ -103,7 +103,7 @@ async function finish() {
     if (!text) {
       // Silence is the commonest outcome of a push-to-talk button, not a
       // failure worth an error banner.
-      emit('error', 'I did not hear anything — try again, or type it.')
+      emit('error', 'I did not hear anything. Try again, or type it.')
       stage.value = 'idle'
       return
     }
@@ -226,7 +226,7 @@ defineExpose({ speakReply, stopPlayback })
     <form v-if="stage === 'review'" class="review" @submit.prevent="send">
       <label>
         I heard
-        <input v-model="heard" type="text" aria-label="What was heard — edit if wrong" />
+        <input v-model="heard" type="text" aria-label="What was heard. Edit it if it is wrong" />
       </label>
       <div class="actions">
         <button type="submit" :disabled="!heard.trim()">Send</button>

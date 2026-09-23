@@ -141,7 +141,7 @@ onMounted(async () => {
     services.value = list
     turns.value.push({
       role: 'assistant',
-      text: `Hello — I book appointments for ${clinic.name}. What do you need to come in for?`,
+      text: `Hello, I book appointments for ${clinic.name}. What do you need to come in for?`,
     })
   } catch (e) {
     error.value = (e as Error).message

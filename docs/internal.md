@@ -1,4 +1,4 @@
-# Appointment assistant — internal notes
+# Appointment assistant: internal notes
 
 For the team evaluating this build. It covers the architecture, what it cost to
 build and what it would cost to run in production, the choices made along the
@@ -11,10 +11,10 @@ way, and the security features implemented.
 **The language model never decides when an appointment happens.**
 
 It listens, works out what the patient is asking for, and then asks the
-scheduling system. Every question with a consequence — is this time free, does
-this dentist perform this treatment, how long does it take, does it still fit
-once the previous appointment is allowed to overrun — is answered by ordinary
-logic with no AI in it.
+scheduling system. Every question with a consequence is answered by ordinary
+logic with no AI in it: is this time free, does this dentist perform this
+treatment, how long does it take, does it still fit once the previous
+appointment is allowed to overrun.
 
 This is not a rule the model has been asked to follow. **The model has no way
 to complete a booking at all.** It can offer times and reserve one for a few
@@ -23,7 +23,7 @@ their screen and submits it. Nothing within the model's reach can do that step.
 
 This matters because of how these models fail. They are agreeable: told firmly
 enough that a slot is free, a model will often agree. With the last step out of
-reach, that pressure has nowhere to go — the worst outcome of a confused
+reach, that pressure has nowhere to go. The worst outcome of a confused
 conversation is a patient offered a time they decline, not a patient who
 arrives to find no appointment.
 
@@ -66,7 +66,7 @@ Five parts. The arrows show what a booking actually does.
        | the patient submits the form
        |
   +--------------------------------------------------+
-  |  Confirmation form — the only thing that books    |
+  |  Confirmation form: the only thing that books     |
   +--------------------------------------------------+
 ```
 
@@ -77,8 +77,8 @@ configuration change, with nothing touched in the scheduler, the assistant or
 the screens.
 
 That is a demonstrated claim rather than an intention. **Two AI providers are
-implemented and both work** — Anthropic's Claude and OpenAI's GPT — and a test
-feeds the same conversation to both and asserts the results are identical once
+implemented and both work**, Anthropic's Claude and OpenAI's GPT. A test feeds
+the same conversation to both and asserts the results are identical once
 normalised, while also asserting that what each one sent over the wire differs.
 Changing provider is one setting. **Two calendar systems are implemented and
 both have been operated against real accounts**, Google and Microsoft. Speech
@@ -92,7 +92,7 @@ The practice's own records are the single source of truth. The dentists'
 calendars are read so the assistant never offers a time a dentist has already
 committed elsewhere, and confirmed appointments are written back into them. If
 a calendar service is unreachable the assistant says it cannot check
-availability, rather than guessing — it will not offer a time it has not
+availability rather than guessing. It will not offer a time it has not
 verified.
 
 ### What the practice offers
@@ -131,12 +131,12 @@ reserves it for five minutes rather than booking it, with the countdown visible
 on screen; an abandoned reservation lapses on its own and the time returns to
 the pool without anyone having to release it. Moving an appointment is a single operation
 rather than a cancel followed by a rebook, so the original time stays until the
-new one is confirmed — someone who abandons a change keeps what they arrived
+new one is confirmed, so someone who abandons a change keeps what they arrived
 with.
 
 **The scheduling rules can be tested exhaustively.** The part that decides what
-is free touches no database, no network and no clock — the current time is
-passed in — so the same inputs always give the same answer. That is what makes
+is free touches no database, no network and no clock. The current time is
+passed in, so the same inputs always give the same answer. That is what makes
 it possible to test a daylight saving changeover, a case that happens twice a
 year and would otherwise be verified by waiting for it.
 
@@ -147,14 +147,14 @@ year and would otherwise be verified by waiting for it.
 ### Building it
 
 **Two days, one engineer, working with an AI coding assistant.** That produced
-7,484 lines of application code and 3,596 lines of tests — 165 tests covering
+7,484 lines of application code and 3,596 lines of tests. The 165 tests cover
 the scheduling rules, the database guarantees, the isolation between practices,
 and both calendar integrations.
 
 What is missing matters more than the number. What exists is a working
 application, operated end to end against real Google and Outlook calendars.
 What does not exist is the work separating that from something a practice can
-be handed — **another 19 to 30 engineer-days**, itemised in section 6. The two
+be handed: **another 19 to 30 engineer-days**, itemised in section 6. The two
 items there with no estimate are larger projects rather than finishing work.
 
 One item there is not engineering time at all: Google requires a review before
@@ -169,8 +169,8 @@ the volume is derived from the practice rather than assumed.
 **Capacity.** Three dentists, Monday to Friday nine to six plus Saturday
 mornings, fifteen minutes between appointments. At full occupancy, and assuming
 every appointment were the shortest treatment offered, the practice fits about
-**507 appointments a month**. That is a deliberate ceiling — a six-hour
-restoration occupies far more — so a realistic mix sits well below it.
+**507 appointments a month**. That is a deliberate ceiling, since a six-hour
+restoration occupies far more, so a realistic mix sits well below it.
 
 **Occupancy is an assumption, and is presented as one:**
 
@@ -181,7 +181,7 @@ restoration occupies far more — so a realistic mix sits well below it.
 | 70% | 355 | $21 | $31 |
 | 85% | 431 | $26 | $37 |
 
-A typed booking conversation costs about **6 cents** in AI usage — measured
+A typed booking conversation costs about **6 cents** in AI usage, measured
 from the tokens a real booking conversation actually used, with caching on. The
 voice figure of about **9 cents** is an estimate rather than a measurement: it
 takes list prices for recognition and synthesis and assumes a six-turn
@@ -216,13 +216,13 @@ month**, rising around any change the practice requests.
 ## 4. Choices made along the way
 
 **A more capable, more expensive AI model.** The model's hardest job is not
-scheduling — it never does any. It is recognising, from a patient's own words,
+scheduling, which it never does. It is recognising, from a patient's own words,
 that someone has knocked out a tooth and needs to be seen today rather than
 next week. That is not the place to save ten dollars a month. The cheaper model
 is a single configuration change and roughly halves both the cost and the wait;
 the reason to revisit it is speed rather than money.
 
-**Reserve, then confirm — rather than booking in one step.** It costs the
+**Reserve, then confirm, rather than booking in one step.** It costs the
 patient an extra action and buys the guarantee in section 1: nothing is booked
 without a deliberate human action on details the patient can read.
 
@@ -233,11 +233,11 @@ have. Timed end to end, one spoken turn takes eight seconds: one and a half to
 recognise the speech, four and a half for the assistant to answer, two to
 synthesise the reply. The written reply appears at six seconds and the audio
 follows. That is acceptable when someone has just pressed a button and expects
-a wait, and would not be on a live telephone call — which is the honest reason
-a telephone version is a later project rather than a small addition.
+a wait, and would not be on a live telephone call. That is the honest reason a
+telephone version is a later project rather than a small addition.
 
 **Everything the patient hears is also on screen.** Speech cannot be re-read,
-so what the recogniser heard is shown — and can be corrected — before anything
+so what the recogniser heard is shown, and can be corrected, before anything
 acts on it. Phone numbers are always typed: digits are where recognition fails
 most often and where a mistake is least recoverable.
 
@@ -245,7 +245,7 @@ most often and where a mistake is least recoverable.
 early version offered "2 PM with Dr. Okafor" while Dr. Hale was equally free at
 2 PM. Every word was true, and the patient reasonably read it as Dr. Hale being
 busy. The cause was the shape of the information the assistant was given, not
-its wording, so the fix was to organise availability by time — which makes the
+its wording, so the fix was to organise availability by time. That makes the
 honest answer the easy one to give.
 
 ---
@@ -269,7 +269,7 @@ that service and expiring on a fixed date.
 **Calendar access is as narrow as each provider allows.** For Google, the
 system asks only for permission to see whether a dentist is busy and to manage
 its own appointments. It cannot read what a dentist's other meetings are about
-or who is attending them — and a dentist can see exactly that on the consent
+or who is attending them, and a dentist can see exactly that on the consent
 screen before agreeing. Microsoft offers no equivalent narrow permission, so
 there the same guarantee rests on the software rather than on the permission;
 the software has no way to read event contents either, but the distinction is
@@ -281,7 +281,7 @@ does not give anyone access to a dentist's calendar.
 **Text written by other people never reaches the AI.** A dentist's calendar
 contains meeting titles and notes written by whoever sent the invitation. That
 is text from outside the practice, and text from outside is exactly how these
-models are manipulated — an event titled with instructions for an assistant is
+models are manipulated. An event titled with instructions for an assistant is
 a real technique. The software has no way to read an event's title, description
 or attendees; it can only ask whether a period is busy. There is nothing to
 sanitise because nothing is fetched.
@@ -290,7 +290,7 @@ sanitise because nothing is fetched.
 moving an appointment requires that this conversation either made the booking
 or looked it up with the name and number it was booked under. A reference
 obtained any other way is refused, and refused in exactly the same words as an
-appointment that does not exist — so the refusal cannot be used to discover
+appointment that does not exist, so the refusal cannot be used to discover
 which references are real.
 
 **There is no clinical information in the system.** Names, phone numbers and
@@ -301,9 +301,9 @@ sentence.
 
 **The assistant will not give clinical advice, and knows when to stop.** It
 does not assess symptoms, quote prices, or discuss insurance. Where symptoms
-suggest something a dentist cannot treat — swelling spreading towards the eye,
-difficulty breathing, bleeding that will not stop — it stops booking, gives the
-practice's number, and hands over.
+suggest something a dentist cannot treat, such as swelling spreading towards
+the eye, difficulty breathing, or bleeding that will not stop, it stops
+booking, gives the practice's number, and hands over.
 
 ### What is deliberately not protected
 
@@ -335,17 +335,17 @@ point at which it stops being optional.
 | | Why it is not here | When it becomes necessary | Effort |
 |---|---|---|---|
 | Verify the patient by text message | Needs a messaging provider and a cost per message | Before real patient data is in the system | 3–4 days |
-| Limits on request rate | No abuse in a controlled trial | Same — it is the cheap half of the above | 1–2 days |
+| Limits on request rate | No abuse in a controlled trial | The cheap half of the above | 1–2 days |
 | Staff login and practice screens | The scheduling and safety work mattered more | Before anyone but the developer connects a calendar | 5–8 days |
 | Monitoring, alerting, backups | A free database tier is right for a demonstration | Before a real appointment book depends on it | 3–5 days |
 | Accessibility and browser testing | Two browsers were used in development | Before patients outside the practice use it | 2–3 days |
 | Google's production review | Test-list access is enough to demonstrate | Before the public can connect calendars | 2–3 days, plus weeks of waiting |
-| Hardening and a staff guide | — | At handover | 3–5 days |
+| Hardening and a staff guide | Finishing work | At handover | 3–5 days |
 | Continuous voice conversation | An eight-second pause is fine for push-to-talk | If this is to answer the telephone | not estimated |
 | Multi-practice administration | The data layer already separates practices; the screens do not | When a second practice is taken on | not estimated |
 
 The system has been operated end to end against real Google and Outlook
 calendars, with three dentists in three different states: one on Google, one on
-Outlook, and one with no calendar connected — which behaves correctly, since a
-dentist's own bookings still block their time and only outside commitments are
-invisible. The remaining work above is operational rather than structural.
+Outlook, and one with no calendar connected. That last case behaves correctly:
+a dentist's own bookings still block their time, and only outside commitments
+are invisible. The remaining work above is operational rather than structural.
