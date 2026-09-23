@@ -82,9 +82,11 @@ feeds the same conversation to both and asserts the results are identical once
 normalised, while also asserting that what each one sent over the wire differs.
 Changing provider is one setting. **Two calendar systems are implemented and
 both have been operated against real accounts**, Google and Microsoft. Speech
-has one working provider and a second, deliberately silent one used when no key
-is configured, so a missing key switches the microphone off rather than failing
-when it is pressed.
+follows the same pattern with one working provider and one deliberately silent
+one, used when no key is configured, so a missing key switches the microphone
+off rather than failing when the button is pressed. Recognition and the voice
+are separate settings, because they are separate purchases: a practice might
+want a cheap transcriber and a good-sounding voice.
 
 The practice's own records are the single source of truth. The dentists'
 calendars are read so the assistant never offers a time a dentist has already
@@ -152,7 +154,8 @@ and both calendar integrations.
 What is missing matters more than the number. What exists is a working
 application, operated end to end against real Google and Outlook calendars.
 What does not exist is the work separating that from something a practice can
-be handed — **another twenty to thirty engineer-days**, itemised in section 6.
+be handed — **another 19 to 30 engineer-days**, itemised in section 6. The two
+items there with no estimate are larger projects rather than finishing work.
 
 One item there is not engineering time at all: Google requires a review before
 an application asking for calendar access can be used by anyone outside a short
