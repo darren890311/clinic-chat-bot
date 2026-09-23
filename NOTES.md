@@ -601,6 +601,42 @@ spent a model call to say something the server already knew, and still left the
 model guessing. State the system owns belongs in the context, not in a fake
 turn.
 
+### Voice, and the eight seconds it takes
+
+Measured end to end against the real providers, one spoken turn:
+
+    recognition (gpt-4o-transcribe)   1.4s
+    the assistant (claude-opus-5)     4.6s
+    synthesis (gpt-4o-mini-tts)       2.0s
+    -----------------------------------
+                                      8.0s
+
+The written reply lands at six seconds and the audio two seconds after it,
+because the client renders the text as soon as the turn returns and asks for
+the audio separately. That ordering is worth keeping: a patient who is reading
+is not waiting.
+
+Eight seconds is defensible for push-to-talk, where the patient pressed a
+button and expects a pause, and would not be for the full-duplex voice that
+is deliberately out of scope — there, eight seconds of silence is a dropped
+call. It is the honest reason LiveKit is the documented upgrade path rather
+than a nice-to-have.
+
+**Voice strengthens the argument for Sonnet that cost alone did not make.**
+The model is more than half the wait, and `claude-sonnet-5` is both cheaper
+and faster. The case for Opus was that recognising an emergency in a
+patient's own words is the model's hardest job and not the place to save ten
+dollars a month; that case is unchanged, but it is now being paid for in
+seconds of a patient's time rather than only in dollars. It is one
+environment variable, and it is the first thing to try if the demo feels
+slow.
+
+A round trip through both providers, as a check that the boundary is real:
+synthesise "I have held Thursday at nine thirty with Doctor Hale", feed the
+audio back to the recogniser, and it returns "I have held Thursday at 9:30
+with Dr. Hale". The normalisation is the recogniser's, not ours, and it is
+the reason a spoken time can be handed to the agent at all.
+
 ### The threat model, written out because nothing authenticates a patient
 
 Nothing in this system asks a patient to prove who they are. There is no
