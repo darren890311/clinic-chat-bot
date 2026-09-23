@@ -42,7 +42,7 @@ MAX_SEARCH_DAYS = 60
 # Enough to cover several full days of quarter-hour starts without letting a
 # wide search flood the context.
 MAX_SLOTS = 200
-MAX_GROUPS = 8
+MAX_DAYS_SHOWN = 8
 
 
 @dataclass
@@ -79,9 +79,10 @@ DEFINITIONS: list[ToolDefinition] = [
         description=(
             "Find appointment times for a treatment, already checked against "
             "the practitioners' own calendars. Returns every start time that "
-            "works in the range, grouped by day, so you can answer questions "
-            "about a specific time without searching again. Use this before "
-            "offering any time to a patient."
+            "works in the range, grouped by day, each one listing every "
+            "practitioner free at it — so you can answer both 'when can I come "
+            "in?' and 'who can see me at 2?' without searching again. Use this "
+            "before offering any time to a patient."
         ),
         parameters={
             "type": "object",
@@ -311,18 +312,55 @@ async def _find_availability(args: dict[str, Any], ctx: ToolContext) -> str:
 
     names = {s.practitioner.slug: s.practitioner.name for s in await _schedules(ctx)}
 
-    # Grouped by day and practitioner so the model can answer a question about
-    # any particular time without another round trip.
-    grouped: dict[tuple[str, str], list[str]] = {}
+    # Grouped by time, not by practitioner.
+    #
+    # Practitioner-major grouping made the question patients actually ask —
+    # "who can see me at 2?" — answerable only by cross-referencing two long
+    # lists of quarter-hour starts. The assistant did not, and offered "2 PM
+    # with Dr. Okafor" from Dr. Okafor's line while Dr. Hale sat free at 2 PM
+    # one line above. Every word of it was true and it reads as "Dr. Hale is
+    # busy then". A shape that makes the honest answer the easy one beats a
+    # prompt asking for the honest answer.
+    grouped: dict[str, dict[str, list[str]]] = {}
     for slot in slots:
         local = slot.start.astimezone(ctx.tz)
-        key = (f"{local:%A %d %B}", slot.practitioner_slug)
-        grouped.setdefault(key, []).append(f"{local:%-I:%M %p}")
+        day = grouped.setdefault(f"{local:%A %d %B}", {})
+        day.setdefault(f"{local:%-I:%M %p}", []).append(slot.practitioner_slug)
 
-    lines = [f"{service.name}, {service.duration_minutes} minutes. Start times available:"]
-    for (day, slug), times in list(grouped.items())[:MAX_GROUPS]:
-        who = names.get(slug, slug)
-        lines.append(f"- {day}, {who} ({slug}): {', '.join(times)}")
+    shown = list(grouped.items())[:MAX_DAYS_SHOWN]
+    appearing = sorted({slot.practitioner_slug for slot in slots})
+
+    lines = [f"{service.name}, {service.duration_minutes} minutes."]
+    if len(appearing) == 1:
+        slug = appearing[0]
+        lines.append(f"All of these are with {names.get(slug, slug)} ({slug}). Start times:")
+        for day, times in shown:
+            lines.append(f"- {day}: {', '.join(times.keys())}")
+    else:
+        lines.append(
+            "Practitioners: "
+            + ", ".join(f"{names.get(s, s)} = {s}" for s in appearing)
+            + ". Below, each day's start times are grouped by who is free at "
+            "them. A time appears exactly once, under everyone who can take "
+            "it — so if a group names two practitioners, both are free then "
+            "and the patient may choose. Say so rather than naming one."
+        )
+        for day, times in shown:
+            # Names once per group of times rather than once per time. Naming
+            # them against all forty quarter-hour starts said the same thing
+            # and cost roughly twice the tokens.
+            by_who: dict[str, list[str]] = {}
+            for time, who in times.items():
+                by_who.setdefault(", ".join(who), []).append(time)
+            lines.append(f"- {day}:")
+            lines.extend(f"    {who}: {', '.join(ts)}" for who, ts in by_who.items())
+
+    if len(grouped) > len(shown):
+        more = len(grouped) - len(shown)
+        lines.append(
+            f"{more} further {'day' if more == 1 else 'days'} with free times "
+            "beyond these are not listed; search from a later date to see them."
+        )
 
     # Local time, no offset. Offering a UTC example beside clinic-local display
     # times invited the model to staple the two together: it read "11:45 AM",

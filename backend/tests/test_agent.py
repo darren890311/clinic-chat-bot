@@ -224,6 +224,107 @@ async def test_the_transcript_is_persisted_and_replayed(session) -> None:
     assert replayed[2].content == "I need a cleaning"
 
 
+async def test_every_practitioner_free_at_a_time_is_named_with_it(session) -> None:
+    """The tool result decides whether an honest answer is easy to give.
+
+    Grouped by practitioner, "who is free at 2 PM?" could only be answered by
+    cross-referencing two lists of thirty quarter-hour starts. The assistant
+    did not, and offered "2 PM with Dr. Okafor" while Dr. Hale was free at 2 PM
+    one line above — true, and read by the patient as "Dr. Hale is busy".
+
+    Grouped by time, both names sit against the time, and there is nothing to
+    cross-reference.
+    """
+    session.add(
+        models.Practitioner(
+            id=uuid.uuid4(),
+            clinic_id=CLINIC,
+            slug="dr-okafor",
+            name="Dr. Okafor",
+            title="Senior Dentist",
+            seniority="senior",
+            service_codes=["A", "C"],
+            working_windows=WINDOWS,
+        )
+    )
+    await session.flush()
+
+    provider = ScriptedProvider(
+        [
+            calls(
+                "find_availability",
+                service_code="C",
+                practitioner_slug=None,
+                earliest=None,
+                days=2,
+            ),
+            says("Root canal is 2.5 hours. 9 AM tomorrow with Dr. Hale or Dr. Okafor?"),
+        ]
+    )
+    await Agent(provider).respond(session, CLINIC, text="I need a root canal", now=NOW)
+
+    result = next(
+        m for m in provider.seen_transcripts[-1] if getattr(m, "role", None) == "tool"
+    ).content
+
+    # The 9 AM start is listed once, under both practitioners, so answering
+    # "who can see me at 9?" is a lookup rather than a cross-reference.
+    grouped = [ln.strip() for ln in result.splitlines() if ln.startswith("    ")]
+    assert any(ln.startswith("dr-hale, dr-okafor: ") and "9:00 AM" in ln for ln in grouped)
+
+    # And no group that is one practitioner's whole day, which is the shape
+    # that produced the misleading offer.
+    assert not any(ln.startswith("dr-hale: ") for ln in grouped)
+    assert not any(ln.startswith("dr-okafor: ") for ln in grouped)
+
+
+async def test_one_practitioner_is_said_once_rather_than_against_every_time(
+    session,
+) -> None:
+    """Naming the same person beside forty start times is noise, not honesty.
+
+    When a search only turns up one practitioner — because the patient asked
+    for them, or because nobody else performs the treatment — the result says
+    so once and lists bare times.
+    """
+    provider = ScriptedProvider(
+        [
+            calls(
+                "find_availability",
+                service_code="A",
+                practitioner_slug=None,
+                earliest=None,
+                days=2,
+            ),
+            says("Tomorrow at 9?"),
+        ]
+    )
+    await Agent(provider).respond(session, CLINIC, text="I need a cleaning", now=NOW)
+
+    result = next(
+        m for m in provider.seen_transcripts[-1] if getattr(m, "role", None) == "tool"
+    ).content
+
+    assert "All of these are with Dr. Hale (dr-hale)" in result
+    assert "dr-hale:" not in result
+
+
+async def test_the_brief_forbids_attributing_a_shared_time_to_one_practitioner(
+    session,
+) -> None:
+    """The data shape makes the honest answer easy; this asks for it.
+
+    Both are needed. The tool result can only offer the model the truth — it
+    cannot stop it from picking one name out of two and sounding certain.
+    """
+    provider = ScriptedProvider([says("ok")])
+    await Agent(provider).respond(session, CLINIC, text="Hello", now=NOW)
+
+    prompt = provider.seen_system.lower()
+    assert "more than one practitioner is free at a time you offer" in prompt
+    assert "keep them with the practitioner they already have" in prompt
+
+
 # --- scope ------------------------------------------------------------------
 
 

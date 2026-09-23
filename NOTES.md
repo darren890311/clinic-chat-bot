@@ -601,6 +601,58 @@ spent a model call to say something the server already knew, and still left the
 model guessing. State the system owns belongs in the context, not in a fake
 turn.
 
+### A true sentence that means something false
+
+Asked for a root canal, the assistant offered "today 12:30 PM with Dr. Hale,
+today 2:00 PM with Dr. Okafor, tomorrow 9:00 AM with Dr. Hale". Challenged on
+it — *I thought you said 2pm is Dr. Okafor* — it explained that both were free
+at 2 PM and it had held Dr. Hale for continuity. That was sound reception
+instinct. But the patient had already been told, in a sentence with no false
+words in it, that 2 PM was Dr. Okafor's; they reasonably read it as Dr. Hale
+being busy, and only found out otherwise because they queried it.
+
+The cause was the shape of the tool result, not the wording of the reply.
+Availability came back grouped by practitioner:
+
+    - Wednesday 23 September, Dr. Hale (dr-hale): 9:00 AM, 9:15 AM, … 3:30 PM
+    - Wednesday 23 September, Dr. Okafor (dr-okafor): 9:00 AM, 9:15 AM, … 3:30 PM
+
+Both lists were identical — every time offered was available with either
+dentist — but establishing that needs a cross-reference of sixty entries. The
+model did what the data made easy: it took a time off one line and attributed
+it to that line's name. The question a patient actually asks is *who can see me
+at 2?*, and the data was organised around the other one.
+
+It is grouped by time now, and each day's times are grouped by the set of
+people free at them, so a time appears exactly once under everyone who can take
+it:
+
+    - Wednesday 23 September:
+        dr-hale, dr-okafor: 9:00 AM, 9:15 AM, … 11:15 AM
+        dr-okafor: 11:30 AM, 11:45 AM, … 3:30 PM
+
+The sets are disjoint by construction, so "who is free at 2 PM" is a lookup.
+The reply became, unprompted, "9:00, 10:00 or 11:00 AM — Dr. Hale or Dr. Okafor
+are free at all three."
+
+Two decisions inside that. Names are written once per group rather than once
+per time: annotating all forty quarter-hour starts said the same thing and cost
+about twice the tokens (4,400 characters against 1,788 for the same diary).
+But every start time is still written out literally, never collapsed into a
+range — the earlier bug where the assistant told a patient 11:45 was
+unavailable came from a truncated list, and a model that once stapled a UTC
+example onto a clinic-local time is not one to hand arithmetic to.
+
+The brief carries the rule as well, because the shape can only make the honest
+answer easy; it cannot stop the model picking one name out of two and sounding
+certain. And for a move it now says it is keeping the patient with their
+existing practitioner, rather than doing it silently.
+
+A smaller thing surfaced alongside: the result was capped at eight
+day-and-practitioner groups, which with three dentists is under three days, and
+the cap was silent. Grouping by day made the same cap eight days, and it says
+how many more it is not showing.
+
 ### The engine could be told to ignore an appointment; the constraint could not
 
 Moving an appointment to an adjacent time — 09:00 to 09:30 — failed. The
