@@ -50,6 +50,17 @@ jobs:
             --command alembic --args upgrade,head
           gcloud run jobs execute ${SERVICE}-migrate --region "$REGION" --wait
 
+      # PUBLIC_BASE_URL, GOOGLE_CLIENT_ID, MICROSOFT_CLIENT_ID and
+      # MICROSOFT_TENANT_ID are repository variables, not secrets: a client id
+      # is public by design and the URL is on the tin.
+      #
+      # PUBLIC_BASE_URL is stated rather than read back from the deployed
+      # service. It has to equal, character for character, the redirect URI
+      # registered with Google and Microsoft, and deriving it would let the
+      # two drift apart silently — the symptom being a consent screen that
+      # ends in redirect_uri_mismatch for a practitioner, not an error here.
+      # Unset, it defaults to http://localhost:8000 and every consent screen
+      # sends the practitioner to a machine that is not there.
       - name: Deploy
         run: |
           SECRETS="DATABASE_URL=database-url:latest"
@@ -58,6 +69,9 @@ jobs:
           SECRETS="$SECRETS,OPENAI_API_KEY=openai-api-key:latest"
           SECRETS="$SECRETS,GOOGLE_CLIENT_SECRET=google-client-secret:latest"
           SECRETS="$SECRETS,MICROSOFT_CLIENT_SECRET=microsoft-client-secret:latest"
+          # Guards the calendar connection endpoints. Without it they return
+          # 503 and no practitioner can attach a diary to the deployed app.
+          SECRETS="$SECRETS,ADMIN_TOKEN=admin-token:latest"
 
           gcloud run deploy ${SERVICE} \
             --image "$IMAGE" --region "$REGION" --quiet \
@@ -65,7 +79,7 @@ jobs:
             --min-instances 0 --max-instances 4 \
             --cpu 1 --memory 512Mi --concurrency 40 --timeout 120 \
             --service-account "clinic-runtime@${{ secrets.GCP_PROJECT }}.iam.gserviceaccount.com" \
-            --set-env-vars ENVIRONMENT=production \
+            --set-env-vars "ENVIRONMENT=production,OAUTH_REDIRECT_BASE=${{ vars.PUBLIC_BASE_URL }},GOOGLE_CLIENT_ID=${{ vars.GOOGLE_CLIENT_ID }},MICROSOFT_CLIENT_ID=${{ vars.MICROSOFT_CLIENT_ID }},MICROSOFT_TENANT_ID=${{ vars.MICROSOFT_TENANT_ID }}" \
             --set-secrets "$SECRETS"
 
       - name: Smoke test the new revision

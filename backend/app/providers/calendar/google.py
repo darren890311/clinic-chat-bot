@@ -32,9 +32,23 @@ API = "https://www.googleapis.com/calendar/v3"
 ENDPOINTS = OAuthEndpoints(
     authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
     token_url="https://oauth2.googleapis.com/token",
-    # Read free/busy and manage our own events. Not calendar.readonly, which
-    # would also expose every event's title and attendees.
-    scopes=("https://www.googleapis.com/auth/calendar.events",),
+    # Two scopes, both minimal, and the pair is deliberate.
+    #
+    # `calendar.events` manages our own appointments. It does not cover the
+    # freeBusy endpoint — that returns 403 "insufficient authentication
+    # scopes" — and the obvious fix, `calendar.readonly`, would hand us every
+    # event's title, attendees and description for a practitioner's whole
+    # diary.
+    #
+    # `calendar.freebusy` returns opaque busy intervals and nothing else. So
+    # the guarantee the CalendarProvider port makes in code — that a booking
+    # assistant has no way to learn who a dentist is meeting — is the same
+    # guarantee Google enforces on the token, and a practitioner reading the
+    # consent screen can see that for themselves.
+    scopes=(
+        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/calendar.freebusy",
+    ),
 )
 
 

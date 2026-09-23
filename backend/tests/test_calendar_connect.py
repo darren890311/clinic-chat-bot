@@ -65,6 +65,58 @@ def test_starting_a_connection_without_the_admin_token_is_refused(client) -> Non
     assert response.status_code == 401
 
 
+def test_reconnecting_records_the_scopes_the_new_token_carries() -> None:
+    """Reconnecting is how a practitioner adds a scope, so the record must follow.
+
+    Adding `calendar.freebusy` and re-authorising left the row still reading
+    `calendar.events` alone. Google ignores scope when refreshing so nothing
+    visibly broke; Microsoft refreshes with whatever is recorded here, and
+    would have quietly asked for less than the token actually held.
+    """
+    from types import SimpleNamespace
+
+    from app.api.calendar_routes import reconnect
+
+    account = SimpleNamespace(
+        encrypted_refresh_token=b"old",
+        account_email="old@example.test",
+        scopes=["https://www.googleapis.com/auth/calendar.events"],
+        invalidated_at="revoked at some point",
+    )
+
+    reconnect(
+        account,
+        encrypted=b"new",
+        email="hale@example.test",
+        scopes=(
+            "https://www.googleapis.com/auth/calendar.events",
+            "https://www.googleapis.com/auth/calendar.freebusy",
+        ),
+    )
+
+    assert account.scopes == [
+        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/calendar.freebusy",
+    ]
+    assert account.encrypted_refresh_token == b"new"
+    assert account.account_email == "hale@example.test"
+    # Reconnecting is how a revoked grant is repaired, so this has to clear.
+    assert account.invalidated_at is None
+
+
+def test_a_non_ascii_token_is_refused_rather_than_crashing(client) -> None:
+    """compare_digest raises TypeError on non-ASCII str.
+
+    An unauthorised request became a 500 with a traceback in the log. The
+    comparison is on bytes now; the refusal is the same refusal.
+    """
+    response = client.get(
+        "/api/calendar/google/connect",
+        params={"practitioner": "dr-hale", "token": "密碼"},
+    )
+    assert response.status_code == 401
+
+
 def test_a_wrong_admin_token_is_refused(client) -> None:
     response = client.get(
         "/api/calendar/google/connect",

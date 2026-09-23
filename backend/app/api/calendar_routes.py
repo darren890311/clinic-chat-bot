@@ -68,8 +68,36 @@ def require_admin(
         )
     supplied = x_admin_token or token or ""
     # Constant-time: a length-leaking comparison is a free hint to an attacker.
-    if not secrets.compare_digest(supplied, expected):
+    # Compared as bytes because compare_digest raises TypeError on a str
+    # containing non-ASCII, which turns a wrong token into a 500 and puts a
+    # traceback in the log instead of a refusal.
+    if not secrets.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Not authorised.")
+
+
+def reconnect(
+    account: models.CalendarAccount,
+    *,
+    encrypted: bytes,
+    email: str,
+    scopes: tuple[str, ...],
+) -> None:
+    """Point an existing connection at a freshly granted token.
+
+    Every field the new grant can change has to move, the scopes included.
+    They did not: adding `calendar.freebusy` and re-authorising left the row
+    still reading `calendar.events` alone. Harmless for Google, which ignores
+    scope when refreshing, and wrong for Microsoft, which refreshes with
+    whatever is recorded here and would have asked for less than the token
+    actually held.
+
+    `invalidated_at` clears because reconnecting is exactly how a practitioner
+    fixes a revoked or expired grant.
+    """
+    account.encrypted_refresh_token = encrypted
+    account.account_email = email
+    account.scopes = list(scopes)
+    account.invalidated_at = None
 
 
 def _redirect_uri(provider: str) -> str:
@@ -106,14 +134,17 @@ class ConnectionOut(BaseModel):
     needs_reconnect: bool
 
 
-@router.get("/status", response_model=list[ConnectionOut])
+@router.get("/status", response_model=list[ConnectionOut], dependencies=[Depends(require_admin)])
 async def connection_status(
     clinic_id: uuid.UUID = Depends(current_clinic_id),
 ) -> list[ConnectionOut]:
     """Which practitioners have which calendars connected.
 
-    Readable without the admin token: it exposes no credentials, and the clinic
-    needs to see at a glance whose diary the bot can actually check.
+    This was readable without the admin token, on the grounds that it exposes
+    no credentials. True, and not the whole test: it returns `account_email`,
+    which is the address each practitioner signed in with. Anybody with the
+    URL could read the staff's personal calendar accounts off a public
+    endpoint. Whoever needs this is staff, and staff hold the token.
     """
     from sqlalchemy import select
 
@@ -229,9 +260,7 @@ async def finish_connection(
         encrypted = encrypt(payload["refresh_token"])
 
         if existing:
-            existing[0].encrypted_refresh_token = encrypted
-            existing[0].account_email = email
-            existing[0].invalidated_at = None
+            reconnect(existing[0], encrypted=encrypted, email=email, scopes=config["scopes"])
         else:
             session.add(
                 models.CalendarAccount(
