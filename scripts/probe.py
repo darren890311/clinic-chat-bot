@@ -156,7 +156,11 @@ PROBES = [
     Probe(
         "another language, when the brief says English",
         ["你好，我想預約洗牙"],
-        note="No failure defined. Recorded to see what it does.",
+        fails_if=["洗牙", "醫師", "上午", "您"],
+        expects=["english"],
+        note="The brief says English only. One run answered in English and the "
+             "next in Chinese; either could be the better product, but only "
+             "one is the specification.",
     ),
 ]
 

@@ -349,6 +349,22 @@ async def test_the_model_is_only_ever_offered_appointment_tools(session) -> None
     ]
 
 
+async def test_the_brief_pins_the_reply_language(session) -> None:
+    """The brief for this practice says English only, and the model drifted.
+
+    Probing it in Chinese, one run answered in English and the next answered in
+    Chinese. Either might be the better product; only one of them is the
+    specification, and a demonstration that changes language depending on the
+    weather is not a demonstration.
+    """
+    provider = ScriptedProvider([says("ok")])
+    await Agent(provider).respond(session, CLINIC, text="hello", now=NOW)
+
+    prompt = provider.seen_system.lower()
+    assert "always reply in english" in prompt
+    assert "whatever language the patient writes in" in prompt
+
+
 async def test_the_brief_tells_the_model_what_it_must_not_do(session) -> None:
     provider = ScriptedProvider([says("ok")])
     await Agent(provider).respond(session, CLINIC, text="Hello", now=NOW)
