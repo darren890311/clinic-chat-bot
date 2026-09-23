@@ -205,6 +205,18 @@ Today it runs on a free tier, which is appropriate for a demonstration and not
 for a practice's appointment book: a paid tier is what buys backups and the
 ability to restore to a point in time.
 
+**The bill is now recorded rather than reconstructed.** Every model call's
+tokens are added to its conversation as they are spent, and an endpoint totals
+them over a period. This is here because the question was asked during
+development and could not be answered: the counts came back on every turn, were
+displayed in the corner of the screen, and were discarded, so the only answer
+available was to count messages and multiply by a figure measured once. A
+practice asking what last month cost deserves a number rather than a range.
+
+Prices are configuration and default to unset, in which case the endpoint
+reports tokens and no money. A wrong price would be quoted; a missing one
+prompts somebody to enter the current rate.
+
 **Maintenance is people, not machines.** The things that will genuinely need
 attention are the calendar providers occasionally changing their interfaces,
 better and cheaper AI models worth moving to, and the practice asking for

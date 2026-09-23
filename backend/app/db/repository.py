@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, time
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,7 @@ from app.db import models
 from app.domain.catalog import Practitioner, Seniority, Service
 from app.domain.intervals import Interval
 from app.domain.scheduling import PractitionerSchedule, SchedulingPolicy, WorkingWindow
+from app.providers.llm import Usage
 
 OCCUPYING = ("held", "confirmed")
 
@@ -439,6 +440,45 @@ async def load_transcript(
         ).scalars()
     )
     return list(reversed(rows))
+
+
+async def add_usage(session: AsyncSession, *, conversation_id: uuid.UUID, usage: Usage) -> None:
+    """Add one model call's tokens to the conversation's running total.
+
+    Called the moment a completion comes back, before anything decides what to
+    do with it. Recording at the end instead would miss the turns that end in a
+    refusal, a provider failure, or the loop guard, and those are paid for like
+    any other.
+    """
+    await session.execute(
+        update(models.Conversation)
+        .where(models.Conversation.id == conversation_id)
+        .values(
+            input_tokens=models.Conversation.input_tokens + usage.input_tokens,
+            output_tokens=models.Conversation.output_tokens + usage.output_tokens,
+            cached_tokens=models.Conversation.cached_tokens + usage.cache_read_tokens,
+        )
+    )
+
+
+async def usage_since(session: AsyncSession, *, since: datetime) -> dict[str, int]:
+    """Token totals for this clinic's conversations started since `since`."""
+    row = (
+        await session.execute(
+            select(
+                func.count(models.Conversation.id),
+                func.coalesce(func.sum(models.Conversation.input_tokens), 0),
+                func.coalesce(func.sum(models.Conversation.output_tokens), 0),
+                func.coalesce(func.sum(models.Conversation.cached_tokens), 0),
+            ).where(models.Conversation.created_at >= since)
+        )
+    ).one()
+    return {
+        "conversations": row[0],
+        "input_tokens": row[1],
+        "output_tokens": row[2],
+        "cached_tokens": row[3],
+    }
 
 
 async def append_message(

@@ -214,6 +214,12 @@ class Conversation(Base):
     # never given. See migration a6d5e0000007.
     identified_phone: Mapped[str | None] = mapped_column(String(32))
     identified_name: Mapped[str | None] = mapped_column(String(200))
+    # Added to as the tokens are spent, not written once at the end: a turn has
+    # several exits and one that forgets to record is a turn paid for and not
+    # counted. See migration c8f7a0000009.
+    input_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    cached_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     created_at: Mapped[datetime] = _created_at()
 
 

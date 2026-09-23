@@ -8,6 +8,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.agent import Agent
+from app.api.calendar_routes import require_admin
 from app.config import get_settings
 from app.db import models
 from app.db import repository as repo
@@ -511,6 +512,53 @@ async def chat(
         pending_hold=pending,
         booked=booked,
     )
+
+
+# --- what it is costing ---------------------------------------------------
+
+
+class UsageOut(BaseModel):
+    conversations: int
+    input_tokens: int
+    output_tokens: int
+    cached_tokens: int
+    # Null when no prices are configured. A wrong number here would be quoted.
+    estimated_cost: float | None = None
+    currency: str = "USD"
+
+
+@router.get("/usage", response_model=UsageOut, dependencies=[Depends(require_admin)])
+async def usage(
+    since: datetime | None = Query(default=None, description="defaults to 30 days ago"),
+    clinic_id: uuid.UUID = Depends(current_clinic_id),
+) -> UsageOut:
+    """What the assistant has cost this practice.
+
+    Exists because the question was asked and could not be answered. The token
+    counts came back on every turn, were shown in the corner of the screen, and
+    were thrown away; the only answer available was to count messages and
+    multiply by a figure measured once.
+    """
+    start = since or datetime.now(UTC) - timedelta(days=30)
+    async with tenant_session(clinic_id) as session:
+        totals = await repo.usage_since(session, since=start)
+
+    cost = None
+    if any(
+        (
+            settings.price_input_per_mtok,
+            settings.price_output_per_mtok,
+            settings.price_cached_per_mtok,
+        )
+    ):
+        cost = round(
+            totals["input_tokens"] / 1_000_000 * settings.price_input_per_mtok
+            + totals["output_tokens"] / 1_000_000 * settings.price_output_per_mtok
+            + totals["cached_tokens"] / 1_000_000 * settings.price_cached_per_mtok,
+            2,
+        )
+
+    return UsageOut(**totals, estimated_cost=cost)
 
 
 # --- voice ------------------------------------------------------------------

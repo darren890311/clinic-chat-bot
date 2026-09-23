@@ -735,6 +735,39 @@ async def test_the_brief_forbids_reading_a_name_out(session) -> None:
     assert "ask for **both** the phone number" in prompt
 
 
+async def test_tokens_are_recorded_even_when_the_turn_fails(session) -> None:
+    """Recorded as they are spent, not when the turn succeeds.
+
+    A turn has several exits: a refusal, a provider failure, the loop guard. All
+    of them are paid for. Writing the total at the end would miss whichever one
+    the code forgot, and the practice would be billed for turns nobody counted.
+
+    Here the provider answers once and then fails, so the turn ends on the
+    failure path with one call's worth of tokens already spent.
+    """
+    provider = ScriptedProvider(
+        [
+            calls("list_services"),
+            LLMError("scripted", "upstream is down"),
+        ]
+    )
+    reply = await Agent(provider).respond(session, CLINIC, text="hello", now=NOW)
+
+    conversation = await _conversation(session, reply.conversation_id)
+    assert conversation.input_tokens > 0
+    assert conversation.output_tokens > 0
+
+
+async def test_an_untouched_conversation_has_recorded_nothing(session) -> None:
+    provider = ScriptedProvider([says("Hello.")])
+    reply = await Agent(provider).respond(session, CLINIC, text="hi", now=NOW)
+    conversation = await _conversation(session, reply.conversation_id)
+    # One call happened, so it is not zero; the point is that it is that call
+    # and not a double count of the cumulative figure on the reply.
+    assert conversation.input_tokens == reply.usage.input_tokens
+    assert conversation.output_tokens == reply.usage.output_tokens
+
+
 # --- failure modes -----------------------------------------------------------
 
 

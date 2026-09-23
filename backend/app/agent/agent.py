@@ -190,6 +190,7 @@ class Agent:
                 )
 
             usage = usage + completion.usage
+            await repo.add_usage(session, conversation_id=conversation.id, usage=completion.usage)
 
             if completion.stop_reason == "refusal":
                 return await self._finish(

@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     microsoft_tenant_id: str = "common"
     oauth_redirect_base: str = "http://localhost:8000"
 
+    # Per-million-token list prices, for turning recorded tokens into money.
+    # Left at zero deliberately: a wrong price is worse than no price, and
+    # these change. Set them from the provider's current published rates and
+    # the usage endpoint starts reporting a cost as well as a count.
+    price_input_per_mtok: float = 0.0
+    price_output_per_mtok: float = 0.0
+    price_cached_per_mtok: float = 0.0
+
     # Shared secret guarding the calendar-connection endpoints. There is no
     # staff login yet, and an unauthenticated endpoint that starts an OAuth flow
     # is an invitation to attach someone else's calendar to this clinic.
