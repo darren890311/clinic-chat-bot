@@ -30,7 +30,7 @@ async def _scope(session, clinic_id: uuid.UUID) -> None:
     )
 
 
-async def seed(slug: str, name: str, timezone: str) -> uuid.UUID:
+async def seed(slug: str, name: str, timezone: str, phone: str) -> uuid.UUID:
     async with SessionFactory() as session, session.begin():
         clinic_id = (
             await session.execute(text("SELECT public.resolve_clinic(:s)"), {"s": slug})
@@ -45,15 +45,30 @@ async def seed(slug: str, name: str, timezone: str) -> uuid.UUID:
             await _scope(session, clinic_id)
             await session.execute(
                 text(
-                    "INSERT INTO clinics (id, slug, name, timezone, scheduling_policy)"
-                    " VALUES (:id, :slug, :name, :tz, '{}')"
+                    "INSERT INTO clinics"
+                    " (id, slug, name, timezone, contact_phone, scheduling_policy)"
+                    " VALUES (:id, :slug, :name, :tz, :phone, '{}')"
                 ),
-                {"id": clinic_id, "slug": slug, "name": name, "tz": timezone},
+                {
+                    "id": clinic_id,
+                    "slug": slug,
+                    "name": name,
+                    "tz": timezone,
+                    "phone": phone,
+                },
             )
             print(f"created clinic {slug} ({clinic_id})")
         else:
-            print(f"clinic {slug} already exists ({clinic_id})")
             await _scope(session, clinic_id)
+            # Reseeding an existing demo clinic moves it, rather than printing
+            # that it exists and leaving the old timezone in place. Without
+            # this, changing the default here has no effect on any database
+            # that has already been seeded — which is every one of them.
+            await session.execute(
+                text("UPDATE clinics SET timezone = :tz, contact_phone = :phone WHERE id = :id"),
+                {"id": clinic_id, "tz": timezone, "phone": phone},
+            )
+            print(f"clinic {slug} already exists ({clinic_id}); timezone set to {timezone}")
 
         existing_services = {
             s.code for s in (await session.execute(select(models.Service))).scalars()
@@ -98,9 +113,14 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--slug", default="darren-dental")
     parser.add_argument("--name", default="Darren Dental")
-    parser.add_argument("--timezone", default="America/New_York")
+    # The demo clinic is in Taipei because that is where it is being shown.
+    # Daylight saving is not lost by this: the engine's wall-clock projection
+    # is asserted in tests/test_scheduling.py against America/New_York, which
+    # does observe it, and a test is better evidence than a demonstration.
+    parser.add_argument("--timezone", default="Asia/Taipei")
+    parser.add_argument("--phone", default="+886 2 2345 6789")
     args = parser.parse_args()
-    clinic_id = asyncio.run(seed(args.slug, args.name, args.timezone))
+    clinic_id = asyncio.run(seed(args.slug, args.name, args.timezone, args.phone))
     print(f"\nseeded: {args.slug} = {clinic_id}")
 
 

@@ -232,6 +232,24 @@ document as the scaling path rather than silently dropping them:
 - Multi-clinic administration UI. The data layer is multi-tenant; the UI is not.
 - Payments, SMS/email reminders, any clinical records.
 
+## The demo clinic is in Taipei
+
+`scripts/seed.py` defaults to `Asia/Taipei` with a local contact number. It was
+`America/New_York`, which put every demonstration twelve hours out from the
+clock of everyone watching, and made a test event added to a real Google
+calendar land at two in the morning clinic time where the engine correctly
+ignored it.
+
+Daylight saving is not lost by the move, even though Taipei has none. The
+engine's wall-clock projection is asserted in
+`tests/test_scheduling.py::test_working_hours_track_wall_clock_across_a_dst_transition`
+against `America/New_York`, whose timezone is fixed in `tests/conftest.py` and
+owes nothing to the seed. A test is better evidence than a demonstration.
+
+Reseeding an existing clinic now updates its timezone and phone rather than
+printing that it exists and leaving them. Otherwise changing the default has
+no effect on any database that has already been seeded, which is all of them.
+
 ## Patient data
 
 Contact details only — name, phone, email. **No clinical information.** Service
