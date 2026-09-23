@@ -213,6 +213,7 @@ class Conversation(Base):
     # is what lets the tools refuse an appointment id this conversation was
     # never given. See migration a6d5e0000007.
     identified_phone: Mapped[str | None] = mapped_column(String(32))
+    identified_name: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = _created_at()
 
 

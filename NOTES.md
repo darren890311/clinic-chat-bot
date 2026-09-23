@@ -665,6 +665,62 @@ audio back to the recogniser, and it returns "I have held Thursday at 9:30
 with Dr. Hale". The normalisation is the recogniser's, not ours, and it is
 the reason a spoken time can be handed to the agent at all.
 
+### A shared family mobile, and the name that quietly disappeared
+
+Deliberate test: three appointments on one number, two booked as "Darren" and
+one as "Kevin". Asked which name they were under, the assistant declined —
+correctly, as it happens, though not for the reason it gave. Underneath, the
+database held something worse.
+
+    full_name |   phone    | appointments
+    ----------+------------+-------------
+    Kevin     | 0915202296 |            3
+
+One record. `upsert_patient` matched on phone alone and then did this:
+
+    existing.full_name = full_name or existing.full_name
+
+So booking for a second person on the same number renamed the first, on every
+appointment they already had. The practice calls out "Kevin" in the waiting
+room for an examination that belongs to Darren, and Darren's own record no
+longer carries his name. A parent booking for a child, a couple on one
+mobile — this is the ordinary case at a dental practice, not an edge one.
+
+Matching on phone *and* name means two people on one number are two records,
+which is what they are. An existing name is never rewritten: correcting a typo
+is `correct_my_details`, scoped to the conversation that made the booking, and
+it should not be reachable by anybody who knows the number.
+
+The match is exact when creating and forgiving when looking up. "Darren" and
+"Darren Chen" become two records rather than merging, which is redundant but
+never wrong, where merging would mean deciding which name survives — the
+decision that caused this. A lookup, though, accepts any name whose words all
+appear in the stored one, so "Darren" finds "Darren Chen" and nobody has to
+remember whether they gave a surname six months ago. "Kevin" finds neither,
+which is the whole point.
+
+**The gap the test was actually aiming at.** Reception asks for a name; this
+did not. A number alone returned every appointment under it — the other
+person's included, visible and cancellable to whoever rang. The lookup now
+takes both, and so does `_in_scope`, via `conversations.identified_name`.
+
+Still not authentication, and worth being precise about what it is: a name is
+not a secret either, and somebody who knows both can do everything they could
+before. What changed is that one person's number is no longer a key to another
+person's record, and a lookup on a guessed number returns nothing rather than
+a list of everybody on it.
+
+**Declining to read the name out is the load-bearing part.** The name is the
+only thing being checked, so an assistant that answers "whose name is this
+under?" has handed over the answer to its own question. A receptionist does
+not read the name on the file back to whoever is asking; she asks them for it.
+That is now in the brief, with a test on it, and the tool result never
+contained a patient name in the first place.
+
+A failed lookup says nothing about which half was wrong. "That number is on
+file, but not under that name" is exactly what somebody working through
+numbers wants to hear.
+
 ### The threat model, written out because nothing authenticates a patient
 
 Nothing in this system asks a patient to prove who they are. There is no

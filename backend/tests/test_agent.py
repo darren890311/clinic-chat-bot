@@ -463,19 +463,19 @@ async def test_an_escalated_conversation_does_not_go_back_to_the_model(session) 
     ).scalar_one() == 0
 
 
-async def _someone_elses_appointment(session) -> models.Appointment:
+async def _someone_elses_appointment(
+    session, *, name: str = "Someone Else", phone: str = "0900111222", hour: int = 14
+) -> models.Appointment:
     """A confirmed booking made in a conversation that is not ours."""
-    patient = models.Patient(
-        id=uuid.uuid4(), clinic_id=CLINIC, full_name="Someone Else", phone="0900111222"
-    )
+    patient = models.Patient(id=uuid.uuid4(), clinic_id=CLINIC, full_name=name, phone=phone)
     appointment = models.Appointment(
         id=uuid.uuid4(),
         clinic_id=CLINIC,
         practitioner_id=SENIOR,
         patient_id=patient.id,
         service_code="A",
-        starts_at=monday(14),
-        ends_at=monday(15),
+        starts_at=monday(hour),
+        ends_at=monday(hour + 1),
         status="confirmed",
         conversation_id=uuid.uuid4(),
     )
@@ -511,7 +511,7 @@ async def test_a_conversation_cannot_cancel_an_appointment_it_was_never_given(
     result = next(
         m for m in provider.seen_transcripts[-1] if getattr(m, "role", None) == "tool"
     ).content
-    assert "ask for the phone number" in result
+    assert "ask for the name and phone number" in result
 
     await session.refresh(other)
     assert other.status == "confirmed", "the booking must survive a call it did not authorise"
@@ -553,7 +553,7 @@ async def test_the_phone_number_the_patient_gives_brings_it_into_scope(session) 
 
     provider = ScriptedProvider(
         [
-            calls("find_my_appointments", phone="0900111222"),
+            calls("find_my_appointments", phone="0900111222", full_name="Someone Else"),
             calls("cancel_appointment", appointment_id=str(other.id)),
             says("Cancelled."),
         ]
@@ -597,7 +597,7 @@ async def test_a_move_cannot_be_aimed_at_an_appointment_out_of_scope(session) ->
     results = [
         m.content for m in provider.seen_transcripts[-1] if getattr(m, "role", None) == "tool"
     ]
-    assert all("ask for the phone number" in r for r in results)
+    assert all("ask for the name and phone number" in r for r in results)
 
     await session.refresh(other)
     assert other.status == "confirmed"
@@ -607,6 +607,116 @@ async def test_a_move_cannot_be_aimed_at_an_appointment_out_of_scope(session) ->
         {"c": CLINIC},
     )
     assert held.scalar_one() == 0, "the replacement must not have been held either"
+
+
+async def test_a_number_shared_by_two_people_does_not_hand_over_both(session) -> None:
+    """Families share a mobile. The number alone was a key to both records.
+
+    A parent books for themselves and for a child on one phone. Asked to
+    cancel, the assistant used to list everything under the number — the other
+    person's appointment included, visible and cancellable to whoever rang.
+    """
+    darren = await _someone_elses_appointment(session, name="Darren Chen", phone="0915", hour=10)
+    kevin = await _someone_elses_appointment(session, name="Kevin Chen", phone="0915", hour=14)
+
+    provider = ScriptedProvider(
+        [
+            calls("find_my_appointments", phone="0915", full_name="Darren"),
+            says("You have one, today at 10."),
+        ]
+    )
+    await Agent(provider).respond(session, CLINIC, text="What have I got booked?", now=NOW)
+
+    result = next(
+        m for m in provider.seen_transcripts[-1] if getattr(m, "role", None) == "tool"
+    ).content
+    assert str(darren.id) in result
+    assert str(kevin.id) not in result, "the other person on this number must not appear"
+
+
+async def test_the_other_persons_appointment_cannot_be_cancelled(session) -> None:
+    """Listing it and acting on it are two gates, and both have to hold.
+
+    A model that had somehow acquired the id — a stale lookup, a mis-copy —
+    must still be refused, because the conversation identified itself as
+    somebody else.
+    """
+    kevin = await _someone_elses_appointment(session, name="Kevin Chen", phone="0915", hour=14)
+    await _someone_elses_appointment(session, name="Darren Chen", phone="0915", hour=10)
+
+    provider = ScriptedProvider(
+        [
+            calls("find_my_appointments", phone="0915", full_name="Darren"),
+            calls("cancel_appointment", appointment_id=str(kevin.id)),
+            says("I could not find that booking."),
+        ]
+    )
+    await Agent(provider).respond(session, CLINIC, text="Cancel it", now=NOW)
+
+    await session.refresh(kevin)
+    assert kevin.status == "confirmed"
+
+
+async def test_a_partial_name_still_finds_the_patient(session) -> None:
+    """Forgiving in one direction only.
+
+    Nobody remembers whether they gave a surname six months ago, so every word
+    the caller gives must appear in the stored name rather than the reverse.
+    "Darren" finds "Darren Chen"; "Darren Smith" finds nothing.
+    """
+    appointment = await _someone_elses_appointment(session, name="Darren Chen", phone="0915")
+
+    provider = ScriptedProvider(
+        [
+            calls("find_my_appointments", phone="0915", full_name="darren"),
+            says("Found it."),
+        ]
+    )
+    await Agent(provider).respond(session, CLINIC, text="What have I got?", now=NOW)
+    assert (
+        str(appointment.id)
+        in next(
+            m for m in provider.seen_transcripts[-1] if getattr(m, "role", None) == "tool"
+        ).content
+    )
+
+
+async def test_a_failed_lookup_does_not_say_which_half_was_wrong(session) -> None:
+    """ "That number exists but the name is wrong" is an existence oracle.
+
+    It is exactly what somebody working through numbers wants to hear, and it
+    would turn a failed guess into a confirmed hit.
+    """
+    await _someone_elses_appointment(session, name="Darren Chen", phone="0915")
+
+    provider = ScriptedProvider(
+        [
+            calls("find_my_appointments", phone="0915", full_name="Kevin"),
+            calls("find_my_appointments", phone="0000", full_name="Kevin"),
+            says("Nothing found."),
+        ]
+    )
+    await Agent(provider).respond(session, CLINIC, text="Find my booking", now=NOW)
+
+    results = [
+        m.content for m in provider.seen_transcripts[-1] if getattr(m, "role", None) == "tool"
+    ]
+    assert results[0] == results[1], "a real number with a wrong name must look like no number"
+
+
+async def test_the_brief_forbids_reading_a_name_out(session) -> None:
+    """The name is the only thing being checked, so the assistant must not supply it.
+
+    A receptionist does not read the name on the file back to whoever is
+    asking; she asks them for it. Handing it over would leave the check
+    answering its own question.
+    """
+    provider = ScriptedProvider([says("ok")])
+    await Agent(provider).respond(session, CLINIC, text="Hello", now=NOW)
+
+    prompt = provider.seen_system.lower()
+    assert "never read a name out" in prompt
+    assert "ask for **both** the phone number" in prompt
 
 
 # --- failure modes -----------------------------------------------------------

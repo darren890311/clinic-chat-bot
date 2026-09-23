@@ -131,8 +131,14 @@ microphone button off rather than offering one that fails when pressed —
    take an appointment id — cancel, and both halves of a move. Row level
    security keeps an id inside its own clinic; within one, `_in_scope` in
    `app/agent/tools.py` requires that this conversation either booked it
-   (`appointments.conversation_id`) or looked it up by a phone number the
-   patient supplied (`conversations.identified_phone`).
+   (`appointments.conversation_id`) or looked it up by the name *and* phone
+   number the patient supplied (`conversations.identified_name` and
+   `identified_phone`).
+
+   Both, because families share a mobile. Patients are keyed on phone and name
+   together for the same reason — matching on phone alone renamed the first
+   person when a second booked on the same number. Never read a name back to a
+   patient: it is the only thing being checked.
 
    This is not patient authentication — nothing verifies the number, and
    anyone who knows it can still see and cancel those bookings. Nor does it

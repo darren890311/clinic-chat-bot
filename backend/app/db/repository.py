@@ -202,6 +202,27 @@ async def get_practitioner_by_id(
     return await session.get(models.Practitioner, practitioner_id)
 
 
+def normalise_name(name: str) -> str:
+    """Casefolded, with runs of whitespace collapsed.
+
+    Only for comparison. What the practice displays and calls out in a waiting
+    room is always the name as the patient typed it.
+    """
+    return " ".join(name.casefold().split())
+
+
+def name_matches(given: str, stored: str) -> bool:
+    """Whether `given` identifies the person whose record reads `stored`.
+
+    Forgiving in one direction only. Every word the caller gave must appear in
+    the stored name, so "Darren" finds "Darren Chen" and so does "Darren
+    Chen" — a patient should not have to remember whether they gave a surname
+    six months ago. "Kevin" finds neither, which is the entire point.
+    """
+    given_words = set(normalise_name(given).split())
+    return bool(given_words) and given_words <= set(normalise_name(stored).split())
+
+
 async def upsert_patient(
     session: AsyncSession,
     clinic_id: uuid.UUID,
@@ -210,20 +231,43 @@ async def upsert_patient(
     phone: str,
     email: str | None,
 ) -> models.Patient:
-    """Match an existing patient on phone number, otherwise create one.
+    """Match on phone *and* name, otherwise create.
 
-    Phone is the practical key for a clinic taking bookings by voice: it is what
-    the patient reliably knows and what reception already uses to find them.
+    Phone alone was the key here, and the name was overwritten on every match.
+    Families share a number — a parent booking for a child, a couple on one
+    mobile — so booking for somebody else silently renamed every appointment
+    the first person had. The practice then calls out the wrong name in the
+    waiting room for a patient whose own record no longer carries their name.
+
+    Matching on both means two people on one number are two records, which is
+    what they are. An existing name is never rewritten: correcting a typo is
+    `correct_my_details`, which is scoped to the conversation that made the
+    booking, and it should not be reachable by anyone who happens to know the
+    number.
+
+    The comparison is exact rather than the forgiving match used for lookup.
+    "Darren" and "Darren Chen" become two records here, which is redundant but
+    never wrong, where merging them would mean deciding which name survives —
+    the decision that caused this.
     """
-    existing = (
-        await session.execute(select(models.Patient).where(models.Patient.phone == phone))
-    ).scalar_one_or_none()
+    candidates = (
+        (
+            await session.execute(
+                select(models.Patient).where(
+                    models.Patient.clinic_id == clinic_id, models.Patient.phone == phone
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
 
-    if existing is not None:
-        existing.full_name = full_name or existing.full_name
-        if email:
-            existing.email = email
-        return existing
+    wanted = normalise_name(full_name)
+    for existing in candidates:
+        if normalise_name(existing.full_name) == wanted:
+            if email:
+                existing.email = email
+            return existing
 
     patient = models.Patient(clinic_id=clinic_id, full_name=full_name, phone=phone, email=email)
     session.add(patient)
@@ -302,24 +346,33 @@ async def practitioner_slugs_by_id(
     return {r.id: r.slug for r in rows}
 
 
-async def upcoming_for_phone(
+async def upcoming_for_patient(
     session: AsyncSession,
     clinic_id: uuid.UUID,
     *,
     phone: str,
+    full_name: str,
     now: datetime,
     limit: int = 10,
 ) -> list[models.Appointment]:
-    """A patient's future bookings, found by the number they gave.
+    """A patient's future bookings, found by the number and name they gave.
 
-    Phone is the handle a patient reliably has over the telephone. Row level
-    security keeps the lookup inside this clinic, so a number that exists at
-    another practice finds nothing here.
+    The number alone returned everything booked under it, which on a shared
+    family mobile is somebody else's appointments — visible, and cancellable,
+    to whoever rang. Reception asks for a name; so does this.
+
+    It is still not authentication. A name is not a secret either, and someone
+    who knows both can still see and cancel. What it does is stop one person's
+    number being a key to another person's record, and reduce a lookup on a
+    guessed number from a list of everybody to nothing at all.
+
+    Row level security keeps the lookup inside this clinic, so a number that
+    exists at another practice finds nothing here.
     """
-    return list(
+    rows = (
         (
             await session.execute(
-                select(models.Appointment)
+                select(models.Appointment, models.Patient)
                 .join(models.Patient, models.Appointment.patient_id == models.Patient.id)
                 .where(
                     models.Patient.phone == phone,
@@ -327,10 +380,17 @@ async def upcoming_for_phone(
                     models.Appointment.starts_at >= now,
                 )
                 .order_by(models.Appointment.starts_at)
-                .limit(limit)
             )
-        ).scalars()
+        )
+        .tuples()
+        .all()
     )
+    # Filtered here rather than in SQL: the match is on words, and expressing
+    # that as a LIKE invites a name containing a wildcard to widen it.
+    matched = [
+        appointment for appointment, patient in rows if name_matches(full_name, patient.full_name)
+    ]
+    return matched[:limit]
 
 
 async def get_or_create_conversation(

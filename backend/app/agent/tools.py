@@ -161,11 +161,23 @@ DEFINITIONS: list[ToolDefinition] = [
     ),
     ToolDefinition(
         name="find_my_appointments",
-        description="Look up a patient's upcoming appointments by phone number.",
+        description=(
+            "Look up a patient's upcoming appointments. Needs both the phone "
+            "number on the booking and the name it was made under, because a "
+            "family shares one number and the number alone would return "
+            "somebody else's appointments. Ask the patient for the name; never "
+            "read a name out to them."
+        ),
         parameters={
             "type": "object",
-            "properties": {"phone": {"type": "string"}},
-            "required": ["phone"],
+            "properties": {
+                "phone": {"type": "string"},
+                "full_name": {
+                    "type": "string",
+                    "description": "The name on the booking, as the patient gives it.",
+                },
+            },
+            "required": ["phone", "full_name"],
         },
     ),
     ToolDefinition(
@@ -282,8 +294,8 @@ async def _in_scope(ctx: ToolContext, appointment_id: uuid.UUID) -> bool:
     unguessable, which is not the same as being checked.
 
     There are two honest ways to have learned one — this conversation booked
-    it, or the patient gave a phone number and the lookup returned it — and
-    both are recorded.
+    it, or the patient gave the name and number on the booking and the lookup
+    returned it — and both are recorded.
 
     It is not authentication: the phone is whatever the patient said, and
     nothing sends a code to it. The case it actually catches is a stale id.
@@ -301,11 +313,16 @@ async def _in_scope(ctx: ToolContext, appointment_id: uuid.UUID) -> bool:
 
     conversation = await ctx.session.get(models.Conversation, ctx.conversation_id)
     phone = conversation.identified_phone if conversation else None
-    if not phone or appointment.patient_id is None:
+    name = conversation.identified_name if conversation else None
+    if not phone or not name or appointment.patient_id is None:
         return False
 
     patient = await ctx.session.get(models.Patient, appointment.patient_id)
-    return patient is not None and patient.phone == phone
+    return (
+        patient is not None
+        and patient.phone == phone
+        and repo.name_matches(name, patient.full_name)
+    )
 
 
 # Said to the model, not to the patient. Deliberately the same answer as a
@@ -313,8 +330,8 @@ async def _in_scope(ctx: ToolContext, appointment_id: uuid.UUID) -> bool:
 # confirm the id exists to anyone probing with one.
 OUT_OF_SCOPE = (
     "No such appointment is available in this conversation. If the patient has "
-    "a booking, ask for the phone number on it and call find_my_appointments "
-    "first."
+    "a booking, ask for the name and phone number on it and call "
+    "find_my_appointments first."
 )
 
 
@@ -471,11 +488,21 @@ async def _hold_slot(args: dict[str, Any], ctx: ToolContext) -> str:
 
 
 async def _find_my_appointments(args: dict[str, Any], ctx: ToolContext) -> str:
-    appointments = await repo.upcoming_for_phone(
-        ctx.session, ctx.clinic_id, phone=args["phone"], now=ctx.now
+    appointments = await repo.upcoming_for_patient(
+        ctx.session,
+        ctx.clinic_id,
+        phone=args["phone"],
+        full_name=args.get("full_name") or "",
+        now=ctx.now,
     )
     if not appointments:
-        return "No upcoming appointments are registered to that number."
+        # Deliberately says nothing about which half did not match. "That
+        # number exists but the name is wrong" is the answer somebody probing
+        # a number wants.
+        return (
+            "No upcoming appointments are registered to that name and number. "
+            "Check both with the patient before trying again."
+        )
 
     # The patient has identified themselves with this number, so the ids about
     # to be handed to the model become ones it may act on. Recorded on the
@@ -485,6 +512,7 @@ async def _find_my_appointments(args: dict[str, Any], ctx: ToolContext) -> str:
     conversation = await ctx.session.get(models.Conversation, ctx.conversation_id)
     if conversation is not None:
         conversation.identified_phone = args["phone"]
+        conversation.identified_name = args.get("full_name") or ""
         await ctx.session.flush()
 
     services = await repo.load_services(ctx.session, ctx.clinic_id)

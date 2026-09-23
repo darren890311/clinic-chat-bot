@@ -681,3 +681,53 @@ async def test_a_failed_move_leaves_the_original_untouched(session) -> None:
 
     await session.refresh(booked)
     assert booked.status == "confirmed"
+
+
+async def test_booking_for_somebody_else_does_not_rename_the_first_patient(session) -> None:
+    """The bug a deliberate test found, and the reason the key changed.
+
+    A parent books for themselves and then for a child on the same mobile.
+    Matching on phone alone found the first record and overwrote its name, so
+    the parent's own appointment retroactively belonged to the child — and the
+    practice calls out the wrong name in the waiting room for a patient whose
+    record no longer carries theirs.
+    """
+    darren = await repo.upsert_patient(
+        session, CLINIC, full_name="Darren Chen", phone="0915", email=None
+    )
+    kevin = await repo.upsert_patient(
+        session, CLINIC, full_name="Kevin Chen", phone="0915", email=None
+    )
+
+    assert darren.id != kevin.id, "two people on one number are two records"
+    await session.refresh(darren)
+    assert darren.full_name == "Darren Chen", "the first name must survive the second booking"
+
+
+async def test_the_same_person_booking_twice_is_still_one_record(session) -> None:
+    """Otherwise every repeat visit is a new patient and nothing is ever found again."""
+    first = await repo.upsert_patient(
+        session, CLINIC, full_name="Darren Chen", phone="0915", email=None
+    )
+    again = await repo.upsert_patient(
+        session, CLINIC, full_name="  darren   chen ", phone="0915", email="d@example.com"
+    )
+
+    assert first.id == again.id, "case and spacing are not a different person"
+    assert again.email == "d@example.com"
+    assert again.full_name == "Darren Chen", "the stored spelling is what the patient typed"
+
+
+async def test_a_lookup_name_matches_on_words_rather_than_on_substrings(session) -> None:
+    """Forgiving about missing words, unforgiving about wrong ones.
+
+    A substring match would make "Chen" find "Chen" and also make "Dar" find
+    "Darren", which is most of the way to matching nothing in particular.
+    """
+    assert repo.name_matches("Darren", "Darren Chen")
+    assert repo.name_matches("darren  CHEN", "Darren Chen")
+    assert repo.name_matches("Chen", "Darren Chen")
+    assert not repo.name_matches("Kevin", "Darren Chen")
+    assert not repo.name_matches("Darren Smith", "Darren Chen")
+    assert not repo.name_matches("Dar", "Darren Chen")
+    assert not repo.name_matches("", "Darren Chen"), "a blank name must not match everyone"
