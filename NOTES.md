@@ -601,6 +601,49 @@ spent a model call to say something the server already knew, and still left the
 model guessing. State the system owns belongs in the context, not in a fake
 turn.
 
+### The threat model, written out because nothing authenticates a patient
+
+Nothing in this system asks a patient to prove who they are. There is no
+login, no code sent to a phone, no secret only they know. That is a reasonable
+place to land for a booking assistant a clinic puts on its website, but it has
+to be said out loud, because every access decision in the system is really a
+question about one of two identifiers.
+
+**`conversation_id` is a bearer token.** The client sends it with each turn and
+the server accepts it; row level security checks the clinic and nothing checks
+the holder. Whoever has it can continue that conversation, and
+`GET /api/conversations/{id}/bookings` returns the patient's name and phone
+number to anyone who asks with it. It is a v4 UUID that is never displayed, so
+the practical exposure is wherever a URL or a log line could carry it. It is
+not persisted in the browser, which is why a refresh starts a new conversation
+and the patient has to identify themselves again.
+
+**A phone number is not a secret, and it can be enumerated.** This is the real
+hole, and it is worse than "somebody might know your number". There is no rate
+limiting anywhere in the application — grep for it; there is none — so nothing
+stops a caller working through a range of numbers, one chat turn each, and
+learning for every hit that this person has an appointment at this practice,
+when, and with which dentist, then cancelling it.
+
+Two fixes at very different prices, and the cheap one is not the real one.
+
+Throttling the lookup — per IP and per number, with a cap on consecutive
+misses — costs a middleware and makes enumeration impractical rather than
+impossible. It does not stop somebody who already knows the number.
+
+Sending a one-time code to the number before disclosing anything is the actual
+answer, and it is the reason SMS being out of scope is a security decision
+rather than a feature decision. Worth saying in those terms: the deliverable
+is not missing SMS reminders, it is accepting an unauthenticated identifier
+for read and cancel access, deliberately and with the consequence written
+down.
+
+What the system does do is limit what there is to take. Patients are contact
+details only — name, phone, email, no clinical information of any kind — so
+the worst disclosure is that a named person has a dental appointment on
+Thursday. The `CalendarProvider` port cannot read event titles or attendees,
+so a practitioner's other commitments never enter any of this either.
+
 ### An id that cannot be guessed is not an id that has been checked
 
 Testing what happens after a browser refresh turned up the honest answer —
@@ -612,12 +655,28 @@ appointment it was. Row level security keeps an id inside its own clinic, and
 within one clinic that was the only thing standing between a conversation and
 any other patient's booking.
 
-Not an open door: the id is a v4 UUID. But "unguessable" is a property of the
-id, not a decision anybody made, and the realistic way a wrong id arrives is
-not an attacker. It is the model mis-copying one out of a tool result, or
-inventing one because the shape looked right. Everything else in this system
-takes the position that the model's authority ends at the tool boundary; this
-was a place where it did not.
+It is worth being exact about what that was worth, because the first two
+accounts of it were inflated. An appointment id is a v4 UUID that never
+appears in the interface — the confirmation card shows the treatment, the
+practitioner, the time and the contact details, never the id — so a patient
+has no way to see one and is never asked for one. An id typed by a stranger
+is not a threat that exists. Nor is a model mis-copying one: a transposed
+character names nothing, and the guard changes nothing about it. Nor is a
+model picking the wrong appointment out of the two in front of it, because
+both are in scope either way.
+
+One concrete case survives. A patient gives a wrong number, the lookup
+answers with somebody else's bookings, and their ids are now in the
+conversation. The patient corrects the number; the stale ids are still in
+context and were, until this, still actionable. `identified_phone` holds only
+the most recent number a lookup answered on, so they go out of scope the
+moment the correction lands.
+
+The larger thing is that the rule now exists. Before, the answer to "who may
+cancel this appointment?" was "whoever can produce the id", and nobody had
+written that down or decided it — it was the emergent consequence of a tool
+signature. It is now a named function with tests, which is the difference
+between a property the system happens to have and one it is committed to.
 
 There are exactly two honest ways for a conversation to hold an id: it booked
 the appointment, which `appointments.conversation_id` already recorded, or the
@@ -630,9 +689,8 @@ Three things worth saying about it.
 **It is not authentication, and the column is not called `verified_phone`.**
 Nothing sends a code to the number; the patient says it and the lookup
 answers. Anyone who knows your number can still list and cancel your
-appointments. That gap needs SMS, which is out of scope, and it belongs in the
-internal document as a stated limitation rather than something this quietly
-appears to have solved.
+appointments. Called `verified_phone`, this would read to the next person as
+though something had checked it.
 
 **The refusal is the same sentence as "no such appointment".** A distinct "that
 one is not yours" answers the question of whether the id is real, which is the

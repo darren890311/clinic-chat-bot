@@ -120,10 +120,13 @@ re-read:
    patient supplied (`conversations.identified_phone`).
 
    This is not patient authentication — nothing verifies the number, and
-   anyone who knows it can still see and cancel those bookings. What it
-   protects against is a model inventing or mis-copying a UUID, which is the
-   realistic failure. Same argument as the missing confirm tool: the guardrail
-   is an absent capability, not an instruction.
+   anyone who knows it can still see and cancel those bookings. Nor does it
+   defend against a mis-copied UUID, which names nothing anyway. What it
+   catches is a stale id: a lookup on a wrong number puts another patient's
+   bookings in context, and correcting the number must take them back out.
+   Its real value is that the rule is written down and tested at all, rather
+   than being whatever the tool signatures happened to imply. See the threat
+   model in NOTES.md before extending any of this.
 
    The refusal is deliberately identical to the one for an appointment that
    does not exist. A distinct "not yours" would confirm which ids are real.

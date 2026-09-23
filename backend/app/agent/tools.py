@@ -283,12 +283,15 @@ async def _in_scope(ctx: ToolContext, appointment_id: uuid.UUID) -> bool:
 
     There are two honest ways to have learned one — this conversation booked
     it, or the patient gave a phone number and the lookup returned it — and
-    both are recorded. Anything else is a model that has invented or
-    mis-copied a UUID, which is the failure this actually guards against.
+    both are recorded.
 
-    It is not authentication. The phone is whatever the patient said; nothing
-    sends a code to it. What it buys is that an id on its own is no longer
-    enough to act on.
+    It is not authentication: the phone is whatever the patient said, and
+    nothing sends a code to it. The case it actually catches is a stale id.
+    A lookup on a mistyped number answers with another patient's bookings,
+    and their ids stay in the model's context after the number is corrected;
+    `identified_phone` holds only the latest number a lookup answered on, so
+    they stop being actionable. Beyond that its value is that the rule is
+    stated and tested rather than implied by a tool signature.
     """
     appointment = await repo.get_appointment(ctx.session, appointment_id)
     if appointment is None:
