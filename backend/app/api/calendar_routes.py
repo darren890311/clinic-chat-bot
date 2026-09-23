@@ -45,6 +45,10 @@ PROVIDERS = {
         "client_id": lambda s: s.microsoft_client_id,
         "client_secret": lambda s: s.microsoft_client_secret,
         "scopes": microsoft.SCOPES,
+        # Graph identifies a calendar by mailbox address, so this one has to
+        # be resolved rather than guessed. Google addresses its own calendar
+        # as "primary" and needs nothing.
+        "resolve_address": microsoft.account_address,
     },
 }
 
@@ -245,7 +249,13 @@ async def finish_connection(
     except OAuthError as exc:
         return _page(str(exc), ok=False)
 
-    email = _account_email(payload) or claims["practitioner"]
+    email = _account_email(payload)
+    if email is None and (resolve := config.get("resolve_address")):
+        email = await resolve(payload.get("access_token", ""))
+    # The slug is a last resort. For Google it is only ever a label; for
+    # Microsoft a wrong address makes free/busy silently empty, so the
+    # connection page says so rather than looking like a success.
+    email = email or claims["practitioner"]
 
     async with tenant_session(clinic_id) as session:
         practitioner = await repo.get_practitioner(session, slug=claims["practitioner"])
@@ -330,8 +340,15 @@ async def disconnect(
 def _account_email(payload: dict) -> str | None:
     """Pull the account address out of the id token, without verifying it.
 
-    This is a display label only; nothing is authorised on the strength of it.
-    The tokens that matter were issued directly by the provider over TLS.
+    Not verified because nothing is *authorised* on the strength of it — the
+    tokens that matter were issued directly by the provider over TLS. It is
+    not merely a label, though: Graph identifies a calendar by its mailbox
+    address, so on the Microsoft side a wrong value makes free/busy return
+    nothing at all, with no error anywhere.
+
+    Usually None in practice. Neither provider is asked for an `openid` scope,
+    so neither returns an id token; `resolve_address` on the provider config
+    is what actually finds it.
     """
     import base64
     import json

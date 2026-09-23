@@ -217,6 +217,18 @@ def test_the_consent_url_asks_for_offline_access_and_the_narrow_scope(client) ->
     assert "calendar.readonly" not in url
 
 
+def test_the_microsoft_consent_url_asks_for_the_scopes_free_busy_needs(client) -> None:
+    """User.Read is not vanity: getSchedule needs the mailbox address.
+
+    Without it the adapter cannot learn which calendar the token speaks for,
+    and free/busy comes back empty with no error.
+    """
+    from app.providers.calendar.microsoft import authorization_url
+
+    url = authorization_url(state="s", redirect_uri="https://example.test/cb")
+    assert "User.Read" in url
+
+
 def test_the_microsoft_consent_url_asks_for_offline_access(client) -> None:
     from app.providers.calendar.microsoft import authorization_url
 

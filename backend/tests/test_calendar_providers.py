@@ -342,3 +342,55 @@ async def test_a_failed_refresh_surfaces_as_a_calendar_error() -> None:
             await GoogleCalendarProvider(http).get_busy(_creds("google"), WINDOW)
     # Not retryable: reconnecting is the only remedy.
     assert exc.value.retryable is False
+
+
+async def test_microsoft_resolves_the_mailbox_the_token_speaks_for() -> None:
+    """getSchedule identifies a calendar by address, so a wrong one is silent.
+
+    The address used to come from an id token that neither provider returns,
+    so it fell back to the practitioner's slug. Graph was then asked for the
+    diary of a person named "dr-okafor", answered 200 with nothing in it, and
+    free/busy was empty forever with no error anywhere.
+    """
+    import httpx
+
+    from app.providers.calendar.microsoft import account_address
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer at"
+        return httpx.Response(200, json={"mail": "dentist@example.test"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assert await account_address("at", client=client) == "dentist@example.test"
+
+
+async def test_microsoft_falls_back_to_the_principal_name_when_there_is_no_mail() -> None:
+    """A personal account often has userPrincipalName and no mail."""
+    import httpx
+
+    from app.providers.calendar.microsoft import account_address
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"mail": None, "userPrincipalName": "d@outlook.test"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assert await account_address("at", client=client) == "d@outlook.test"
+
+
+async def test_resolving_the_mailbox_never_breaks_the_connection() -> None:
+    """A missing label is not worth failing an authorisation that succeeded.
+
+    The body is HTML rather than JSON on purpose. A refused Graph call, or a
+    proxy in front of it, answers with a page; parsing that before checking
+    the status raises something httpx does not own, and the practitioner sees
+    a failed connection instead of a connected calendar with a dull name.
+    """
+    import httpx
+
+    from app.providers.calendar.microsoft import account_address
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, html="<html><body>Forbidden</body></html>")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assert await account_address("at", client=client) is None

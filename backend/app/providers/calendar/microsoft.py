@@ -33,13 +33,50 @@ from app.providers.calendar.oauth import OAuthEndpoints, OAuthError, token_store
 API = "https://graph.microsoft.com/v1.0"
 
 # offline_access is what makes Graph return a refresh token at all.
+#
+# User.Read is not for the profile. `getSchedule` identifies a calendar by its
+# mailbox address, so the adapter has to know which mailbox this token belongs
+# to, and the token response does not say — we ask for no id token. Without it
+# the address fell back to the practitioner's slug, getSchedule was asked for
+# the diary of a person named "dr-okafor", and Graph answered 200 with nothing
+# in it. Free/busy was silently always empty.
 SCOPES = (
     "offline_access",
+    "https://graph.microsoft.com/User.Read",
     "https://graph.microsoft.com/Calendars.ReadWrite",
 )
 
 # `showAs` values that mean the practitioner is not available.
 BUSY_STATES = {"busy", "oof", "workingElsewhere"}
+
+
+async def account_address(
+    access_token: str, *, client: httpx.AsyncClient | None = None
+) -> str | None:
+    """Which mailbox this token speaks for.
+
+    Called once, at connection time, and stored. `getSchedule` needs it on
+    every free/busy call and there is nowhere else to get it: the token
+    response carries no id token because we ask for no `openid` scope, and a
+    Graph access token for a personal account is opaque.
+
+    Returns None rather than raising. A connection that works and is labelled
+    with a slug is better than a connection that could not be made, and the
+    caller has a fallback.
+    """
+    owned = client is None
+    http = client or httpx.AsyncClient(timeout=15.0)
+    try:
+        response = await http.get(f"{API}/me", headers={"Authorization": f"Bearer {access_token}"})
+        if response.status_code >= 400:
+            return None
+        data = response.json()
+        return data.get("mail") or data.get("userPrincipalName")
+    except httpx.HTTPError:
+        return None
+    finally:
+        if owned:
+            await http.aclose()
 
 
 def _endpoints() -> OAuthEndpoints:

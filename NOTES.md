@@ -629,6 +629,53 @@ spent a model call to say something the server already knew, and still left the
 model guessing. State the system owns belongs in the context, not in a fake
 turn.
 
+### Graph answered 200 with nothing in it, for two hours
+
+Connecting Outlook took a detour — a graduated student account with no Azure
+access, an OAuth client created in the wrong Google project, a card, a tenant.
+What it bought was a bug that no amount of unit testing would have found.
+
+Everything reported success:
+
+    authorisation            ok
+    refresh token, encrypted ok
+    appointment written      ok, microsoft_event_id set
+    free/busy read           HTTP 200 ... 0 intervals
+
+`getSchedule` identifies a calendar by its mailbox address. The address came
+from `_account_email`, which reads an id token — and neither provider returns
+one, because neither is asked for an `openid` scope. So it fell through to the
+practitioner's slug, and Graph was asked for the diary of a person named
+`dr-okafor`. It answered politely, with an empty result. From the outside that
+practitioner was simply always free, forever, with no error anywhere.
+
+Google is immune to this: it addresses the connected calendar as `primary` and
+never looks at the address. So the Google path could have been tested to
+exhaustion without the problem appearing. The two providers address a calendar
+differently — "my own calendar" against "the calendar belonging to this
+mailbox" — and only one of them cares whether we know who we are.
+
+The address is resolved from Graph `/me` at connection time and stored, which
+is why `User.Read` is now in the Microsoft scopes. It is not there for the
+profile; it is there because free/busy does not work without knowing the
+mailbox. `_account_email`'s docstring said the value was "a display label
+only; nothing is authorised on the strength of it" — true about authorisation
+and wrong about consequence, so it says both now.
+
+Two smaller things the live connection corrected.
+
+The adapter's comment claimed *"Personal accounts answer with a 4xx here
+rather than an empty result"*, justifying the `calendarView` fallback. A
+current outlook.com account answers `getSchedule` with 200. The fallback is
+still worth keeping and is still tested, but it is defensive rather than the
+documented behaviour of personal accounts, and the comment now says so.
+
+Reconnecting to widen a scope only worked because the recorded scopes are
+updated on reconnect — a fix made an hour earlier for a different reason.
+Without it the account would have carried `User.Read` in its token and
+`Calendars.ReadWrite` alone in its record, and Microsoft refreshes with
+whatever is recorded.
+
 ### Voice, and the eight seconds it takes
 
 Measured end to end against the real providers, one spoken turn:
