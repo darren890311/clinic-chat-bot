@@ -21,11 +21,16 @@ to complete a booking at all.** It can offer times and reserve one for a few
 minutes; the appointment is only made when the patient fills in a short form on
 their screen and submits it. Nothing within the model's reach can do that step.
 
-This matters because of how these models fail. They are agreeable: told firmly
-enough that a slot is free, a model will often agree. With the last step out of
-reach, that pressure has nowhere to go. The worst outcome of a confused
-conversation is a patient offered a time they decline, not a patient who
-arrives to find no appointment.
+This matters because of the way these models fail. They do not crash. They
+agree with you. A patient who insists three times that nine o'clock is free
+and that the assistant should just book it will, with most systems, eventually
+be told that it is booked.
+
+Here that cannot happen, because there is no button for the assistant to press
+however thoroughly it is persuaded. Tested by insisting four times in a row, it
+pointed back at the form four times. The worst outcome of a confused
+conversation is a patient offered a time they decline, rather than a patient
+who arrives to find no appointment.
 
 It also makes the AI genuinely replaceable. Switching provider changes the
 wording of replies; it cannot change which slots exist, who is qualified, or
@@ -208,8 +213,8 @@ ability to restore to a point in time.
 **The bill is now recorded rather than reconstructed.** Every model call's
 tokens are added to its conversation as they are spent, and an endpoint totals
 them over a period. This is here because the question was asked during
-development and could not be answered: the counts came back on every turn, were
-displayed in the corner of the screen, and were discarded, so the only answer
+development and could not be answered. The counts came back on every turn, were
+displayed in the corner of the screen, and were then discarded. The only answer
 available was to count messages and multiply by a figure measured once. A
 practice asking what last month cost deserves a number rather than a range.
 
@@ -326,10 +331,10 @@ can see when a patient is coming in and with whom, and can cancel it.
 
 This is worth comparing with what the practice does today. Ring any dental
 surgery, give a name and a number, and the receptionist will tell you the
-appointment and cancel it if asked. The risk is not new. What changes is scale
-and attention: a receptionist can be talked round once per telephone call and
-may notice something odd about the third attempt; a web address answers in
-parallel and notices nothing.
+appointment and cancel it if asked. The risk is not new. What changes is how often it can
+be tried. Someone guessing their way in gets one attempt per telephone call,
+and a receptionist starts to wonder by the third. A web address takes any
+number of attempts, from anyone, at any hour, and wonders nothing.
 
 Closing it requires sending a one-time code to the phone number before anything
 is disclosed, which needs text messaging. **That is the important point about
