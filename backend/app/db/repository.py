@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, time
 
-from sqlalchemy import and_, func, or_, select, text, update
+from sqlalchemy import String, and_, any_, func, literal, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -101,7 +101,13 @@ async def load_schedules(
 
     stmt = select(models.Practitioner).where(models.Practitioner.is_active.is_(True))
     if service_code:
-        stmt = stmt.where(models.Practitioner.service_codes.any(service_code))
+        # `Column.any(value)` for arrays is removed in SQLAlchemy 2.1. This
+        # compiles to the same `= ANY (service_codes)`; the literal is typed
+        # so the dialect binds it as the array's element type rather than
+        # guessing from a bare Python string.
+        stmt = stmt.where(
+            literal(service_code, String(8)) == any_(models.Practitioner.service_codes)
+        )
     practitioners = list((await session.execute(stmt)).scalars())
 
     occupied = select(models.Appointment).where(
@@ -420,21 +426,17 @@ async def upcoming_for_patient(
     exists at another practice finds nothing here.
     """
     rows = (
-        (
-            await session.execute(
-                select(models.Appointment, models.Patient)
-                .join(models.Patient, models.Appointment.patient_id == models.Patient.id)
-                .where(
-                    models.Patient.phone == phone,
-                    models.Appointment.status == "confirmed",
-                    models.Appointment.starts_at >= now,
-                )
-                .order_by(models.Appointment.starts_at)
+        await session.execute(
+            select(models.Appointment, models.Patient)
+            .join(models.Patient, models.Appointment.patient_id == models.Patient.id)
+            .where(
+                models.Patient.phone == phone,
+                models.Appointment.status == "confirmed",
+                models.Appointment.starts_at >= now,
             )
+            .order_by(models.Appointment.starts_at)
         )
-        .tuples()
-        .all()
-    )
+    ).all()
     # Filtered here rather than in SQL: the match is on words, and expressing
     # that as a LIKE invites a name containing a wildcard to widen it.
     matched = [
