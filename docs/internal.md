@@ -373,7 +373,7 @@ point at which it stops being optional.
 | | Why it is not here | When it becomes necessary | Effort |
 |---|---|---|---|
 | Verify the patient by text message | Needs a messaging provider and a cost per message | Before real patient data is in the system | 3–4 days |
-| Limits on request rate | No abuse in a controlled trial | The cheap half of the above | 1–2 days |
+| Limits on request rate | No abuse in a controlled trial | Alongside the row above, and much the cheaper half of it | 1–2 days |
 | Staff login and practice screens | The scheduling and safety work mattered more | Before anyone but the developer connects a calendar | 5–8 days |
 | Monitoring, alerting, backups | A free database tier is right for a demonstration | Before a real appointment book depends on it | 3–5 days |
 | Accessibility and browser testing | Two browsers were used in development | Before patients outside the practice use it | 2–3 days |
