@@ -199,24 +199,30 @@ takes list prices for recognition and synthesis and assumes a six-turn
 conversation. Most of the addition is the synthesised voice rather than the
 recognition. Reality sits between the two columns.
 
-**A full production month, at roughly 70% occupancy:**
+**What it costs today is about a dollar a month.** The server scales to
+nothing when idle, the database is on a free tier, nothing is monitored, no
+domain has been bought and no text messages are sent. Four of the six lines
+below do not exist yet. Everything spent so far has been the AI itself, and
+across all development and testing that is under ten dollars.
 
-| | Monthly |
-|---|---|
-| AI and speech | $21–31 |
-| Server (scales to nothing when idle) | under $1 |
-| Database with backups and point-in-time recovery | $20–30 |
-| Error tracking and uptime monitoring | $0–25 |
-| Domain name | about $1 |
-| Text messages for patient verification, once built | $10–25 |
-| **Total** | **roughly $55–110 a month** |
+**A full production month, at roughly 70% occupancy, is a different figure,
+and most of the difference is work that has not been done:**
 
-The database line is the main difference between this and the local version.
-Today it runs on a free tier. That is appropriate for a demonstration and not
-for a practice's appointment book, because a paid tier is what buys backups and
-the ability to restore to a point in time.
+| | Monthly | In place today |
+|---|---|---|
+| AI and speech | $21–31 | yes |
+| Server, scaling to nothing when idle | under $1 | yes |
+| Database with backups and point-in-time recovery | $20–30 | no, free tier |
+| Error tracking and uptime monitoring | $0–25 | no |
+| Domain name | about $1 | no |
+| Text messages for patient verification, once built | $10–25 | no |
+| **Total** | **roughly $55–110 a month** | |
 
-**The bill is now recorded rather than reconstructed.** Every model call's
+The database line is the one that matters most. A free tier is right for a
+demonstration and wrong for a practice's appointment book, because a paid tier
+is what buys backups and the ability to restore to a point in time.
+
+**The bill is measured rather than estimated.** Every model call's
 tokens are added to its conversation as they are spent, and an endpoint totals
 them over a period. This is here because the question was asked during
 development and could not be answered. The counts came back on every turn, were
@@ -226,7 +232,9 @@ practice asking what last month cost deserves a number rather than a range.
 
 Prices are configuration and default to unset, in which case the endpoint
 reports tokens and no money. A wrong price would be quoted; a missing one
-prompts somebody to enter the current rate.
+prompts somebody to enter the current rate. Cache writes are counted
+separately from cache reads. A write bills at 1.25 times the input rate and a
+read at about a tenth of it, so averaging the two would flatter the figure.
 
 **Maintenance is people, not machines.** The things that will genuinely need
 attention are the calendar providers occasionally changing their interfaces,
