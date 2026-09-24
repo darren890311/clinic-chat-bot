@@ -12,8 +12,8 @@ way, and the security features implemented.
 
 It listens, works out what the patient is asking for, and then asks the
 scheduling system. Every question with a consequence is answered by ordinary
-logic with no AI in it: is this time free, does this dentist perform this
-treatment, how long does it take, does it still fit once the previous
+logic with no AI in it. Is this time free. Does this dentist perform this
+treatment. How long does it take. Does it still fit once the previous
 appointment is allowed to overrun.
 
 This is not a rule the model has been asked to follow. **The model has no way
@@ -87,9 +87,9 @@ the same conversation to both and asserts the results are identical once
 normalised, while also asserting that what each one sent over the wire differs.
 Changing provider is one setting. **Two calendar systems are implemented and
 both have been operated against real accounts**, Google and Microsoft. Speech
-follows the same pattern with one working provider and one deliberately silent
-one, used when no key is configured, so a missing key switches the microphone
-off rather than failing when the button is pressed. Recognition and the voice
+follows the same pattern, with one working provider and one deliberately
+silent one. The silent one is used when no key is configured, so a missing key
+switches the microphone off rather than failing when the button is pressed. Recognition and the voice
 are separate settings, because they are separate purchases: a practice might
 want a cheap transcriber and a good-sounding voice.
 
@@ -126,18 +126,24 @@ specific way this goes wrong.
 
 **Two patients cannot take the same slot.** Application code that checks "is
 this free?" and then writes the booking has a gap between the two steps where
-another request can slip in. The database itself refuses overlapping
-appointments for the same dentist, so the second write fails rather than
-succeeds. Correct application logic is the first line; this is the line that
-does not depend on the code being right.
+another request can slip in. Three things close it, in order.
+
+Requests for the same dentist queue rather than run side by side, so the second
+one waits for the first to finish and is then told the time has gone. That is
+why it is turned away before it writes anything at all. If it does write, the
+database itself refuses overlapping appointments for the same dentist and the
+write fails.
+
+Correct application logic is the first line and the queue is the second. The
+database constraint is the one that does not depend on either of them being
+right.
 
 **A patient who walks away mid-conversation loses nothing.** Choosing a time
-reserves it for five minutes rather than booking it, with the countdown visible
-on screen; an abandoned reservation lapses on its own and the time returns to
-the pool without anyone having to release it. Moving an appointment is a single operation
-rather than a cancel followed by a rebook, so the original time stays until the
-new one is confirmed, so someone who abandons a change keeps what they arrived
-with.
+reserves it for five minutes rather than booking it, and the countdown is on
+screen. An abandoned reservation lapses on its own, and the time returns to the
+pool without anyone having to release it. Moving an appointment is a single operation rather
+than a cancel followed by a rebook. The original time stays until the new one
+is confirmed, so someone who abandons a change keeps what they arrived with.
 
 **The scheduling rules can be tested exhaustively.** The part that decides what
 is free touches no database, no network and no clock. The current time is
@@ -188,9 +194,9 @@ restoration occupies far more, so a realistic mix sits well below it.
 
 A typed booking conversation costs about **6 cents** in AI usage, measured
 from the tokens a real booking conversation actually used, with caching on. The
-voice figure of about **9 cents** is an estimate rather than a measurement: it
+voice figure of about **9 cents** is an estimate rather than a measurement. It
 takes list prices for recognition and synthesis and assumes a six-turn
-conversation, and most of the addition is the synthesised voice rather than the
+conversation. Most of the addition is the synthesised voice rather than the
 recognition. Reality sits between the two columns.
 
 **A full production month, at roughly 70% occupancy:**
@@ -206,9 +212,9 @@ recognition. Reality sits between the two columns.
 | **Total** | **roughly $55–110 a month** |
 
 The database line is the main difference between this and the local version.
-Today it runs on a free tier, which is appropriate for a demonstration and not
-for a practice's appointment book: a paid tier is what buys backups and the
-ability to restore to a point in time.
+Today it runs on a free tier. That is appropriate for a demonstration and not
+for a practice's appointment book, because a paid tier is what buys backups and
+the ability to restore to a point in time.
 
 **The bill is now recorded rather than reconstructed.** Every model call's
 tokens are added to its conversation as they are spent, and an endpoint totals
@@ -287,9 +293,9 @@ that service and expiring on a fixed date.
 system asks only for permission to see whether a dentist is busy and to manage
 its own appointments. It cannot read what a dentist's other meetings are about
 or who is attending them, and a dentist can see exactly that on the consent
-screen before agreeing. Microsoft offers no equivalent narrow permission, so
-there the same guarantee rests on the software rather than on the permission;
-the software has no way to read event contents either, but the distinction is
+screen before agreeing. Microsoft offers no equivalent narrow permission. There
+the same guarantee rests on our software rather than on the permission itself.
+The software has no way to read event contents either, but the distinction is
 real and worth recording.
 
 **Calendar credentials are encrypted before storage.** A copy of the database
