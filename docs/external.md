@@ -28,9 +28,9 @@ any of the three dentists. Root canals, crowns and full restorations are
 offered only with the senior dentists. A patient cannot book a treatment with
 someone who does not perform it.
 
-**It knows how long things take.** A six-hour restoration is not squeezed into
-an afternoon slot, and fifteen minutes is left between appointments so that one
-running late does not push the whole day over.
+**It knows how long things take.** A six-hour restoration is never squeezed
+into an afternoon slot. Fifteen minutes is left between appointments, so one
+that runs late does not push the whole day over.
 
 **It moves and cancels appointments too.** A patient who wants a later time
 gets the new one held before the old one is released, so they never end up with
@@ -44,10 +44,9 @@ them your number, and tells them to ring you now.
 
 Severe toothache on its own does not trigger any of that. The assistant treats
 it as a reason to be seen quickly: it searches from today rather than next
-week, and tells the patient that is what it is doing. It hands over to you only
-for the symptoms listed above, and for a knocked-out tooth, where it tells the
-patient to ring you immediately while it finds them the earliest slot there
-is.
+week, and tells the patient that is what it is doing. It hands over to you only for the symptoms listed
+above. A knocked-out tooth is the other exception: there it tells the patient
+to ring you immediately, and looks for the earliest slot while they do.
 
 ### What it does not do
 
@@ -126,9 +125,9 @@ later is a short job, not a rebuild.
 ### 2. Each dentist connects their calendar
 
 **This part happens outside the application, on Google's or Microsoft's own
-site, and each dentist must do it with their own account.** Nobody can do it on
-their behalf, which is the point: you are giving the assistant permission to
-look at a specific person's diary, and only that person can grant it.
+site.** Each dentist has to do it themselves, signed in to their own account.
+Nobody can do it for them, and that is the point: this is permission to look at
+one named person's diary, so only that person can give it.
 
 We will send each dentist a link. What follows is what they will see.
 
@@ -249,15 +248,16 @@ is not closed yet. A name and a number are not secrets, so somebody who knows
 both could see when a patient is coming in and could cancel the appointment.
 
 It is the same check your receptionist makes on the telephone, and it has the
-same weakness. The difference is scale: she can be talked round once per call
-and may notice something odd about the third attempt, while a web page answers
-everyone at once and notices nothing.
+same weakness. The difference is how often it can be tried. Someone guessing
+their way in gets one attempt per phone call, and your receptionist will start
+to wonder by the third. A web page takes any number of attempts, from anyone,
+at any hour, and wonders nothing.
 
 **Sending a one-time code to the phone number is the fix, and it is the next
-thing we are building.** Until it ships, the sensible reading is that the
-assistant is about as private as your phone line, which is to say reasonably
-private and not secret. If that is not good enough for your practice, say so
-and we will hold the public launch until the code is in place.
+thing we are building.** Until it ships, treat the assistant as you treat
+your phone line: reasonably private, not secret. If that is not good enough for
+your practice, tell us and we will hold the public launch until the code is
+in place.
 
 ---
 
