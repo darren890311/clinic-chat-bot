@@ -60,6 +60,15 @@ pre {
   background: #f6f8f9; border: 1px solid var(--rule); border-radius: 4px;
   padding: .8rem 1rem; overflow: visible; break-inside: avoid; margin: 1rem 0 1.2rem;
 }
+blockquote {
+  margin: 1rem 0 1.2rem;
+  padding: .1rem 0 .1rem 1rem;
+  border-left: 2px solid var(--accent);
+  color: #33393f;
+  break-inside: avoid;
+}
+blockquote p { margin: .5rem 0; }
+blockquote strong { color: var(--ink); }
 ul { margin: 0 0 .75rem; padding-left: 1.2rem; }
 li { margin-bottom: .2rem; }
 .lede { color: var(--muted); font-size: 10pt; margin-bottom: 1.6rem; }
@@ -124,6 +133,25 @@ def render(md: str) -> str:
 
         elif line.strip() in ("---", "***", "___"):
             flush()
+
+        elif line.startswith(">"):
+            flush()
+            # A quoted block: the sample conversation in the external guide.
+            # Speakers are separated by a line holding nothing but the quote
+            # mark, which is a paragraph break inside the quote rather than the
+            # end of it. Treating those as content merged all four turns into
+            # one paragraph and put the marks on the page.
+            paras: list[list[str]] = [[]]
+            while i < len(lines) and lines[i].startswith(">"):
+                content = lines[i].lstrip(">").strip()
+                if content:
+                    paras[-1].append(content)
+                elif paras[-1]:
+                    paras.append([])
+                i += 1
+            i -= 1
+            body = "".join(f"<p>{inline(' '.join(para))}</p>" for para in paras if para)
+            out.append(f"<blockquote>{body}</blockquote>")
 
         elif line.startswith(("- ", "* ")):
             flush()
