@@ -165,12 +165,21 @@ and both calendar integrations.
 What is missing matters more than the number. What exists is a working
 application, operated end to end against real Google and Outlook calendars.
 What does not exist is the work separating that from something a practice can
-be handed: **another 19 to 30 engineer-days**, itemised in section 6. The two
-items there with no estimate are larger projects rather than finishing work.
+be handed, listed in section 6.
 
-One item there is not engineering time at all: Google requires a review before
-an application asking for calendar access can be used by anyone outside a short
-test list. That is weeks of waiting, and it has to be started early.
+Estimating that from this project's own rate rather than from habit puts it at
+**roughly six to ten engineer-days**. The two days above produced more code, more
+tests and more integrations than everything still outstanding. An estimate
+should not be several times larger than the work it is smaller than. The two items in section 6 with no estimate
+are larger projects rather than finishing work.
+
+Three of the remaining items are not bounded by engineering speed at all, and
+those are the ones to start first. Google requires a review before an
+application asking for calendar access can be used by anyone outside a short
+test list, which is weeks of waiting. Text-message verification needs a
+provider account, a number, and delivery tested against real carriers.
+Accessibility and browser coverage need real devices and, ideally, somebody who
+uses a screen reader.
 
 ### Running it in production
 
@@ -370,17 +379,17 @@ reminders. What it actually decides is that nothing authenticates a patient.
 None of these are oversights. Each has a reason for being out of scope, and a
 point at which it stops being optional.
 
-| | Why it is not here | When it becomes necessary | Effort |
-|---|---|---|---|
-| Verify the patient by text message | Needs a messaging provider and a cost per message | Before real patient data is in the system | 3–4 days |
-| Limits on request rate | No abuse in a controlled trial | Alongside the row above, and much the cheaper half of it | 1–2 days |
-| Staff login and practice screens | The scheduling and safety work mattered more | Before anyone but the developer connects a calendar | 5–8 days |
-| Monitoring, alerting, backups | A free database tier is right for a demonstration | Before a real appointment book depends on it | 3–5 days |
-| Accessibility and browser testing | Two browsers were used in development | Before patients outside the practice use it | 2–3 days |
-| Google's production review | Test-list access is enough to demonstrate | Before the public can connect calendars | 2–3 days, plus weeks of waiting |
-| Hardening and a staff guide | Finishing work | At handover | 3–5 days |
-| Continuous voice conversation | An eight-second pause is fine for push-to-talk | If this is to answer the telephone | not estimated |
-| Multi-practice administration | The data layer already separates practices; the screens do not | When a second practice is taken on | not estimated |
+| | Why it is not here | When it becomes necessary |
+|---|---|---|
+| Verify the patient by text message | Needs a messaging provider and a cost per message | Before real patient data is in the system |
+| Limits on request rate | No abuse in a controlled trial | Alongside the row above, and much the cheaper half of it |
+| Staff login and practice screens | The scheduling and safety work mattered more | Before anyone but the developer connects a calendar |
+| Monitoring, alerting, backups | A free database tier is right for a demonstration | Before a real appointment book depends on it |
+| Accessibility and browser testing | Two browsers were used in development | Before patients outside the practice use it |
+| Google's production review | Test-list access is enough to demonstrate | Before the public can connect calendars |
+| Hardening and a staff guide | Finishing work | At handover |
+| Continuous voice conversation | An eight-second pause is fine for push-to-talk | If this is to answer the telephone |
+| Multi-practice administration | The data layer already separates practices; the screens do not | When a second practice is taken on |
 
 The system has been operated end to end against real Google and Outlook
 calendars, with three dentists in three different states: one on Google, one on
