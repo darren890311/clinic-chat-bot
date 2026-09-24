@@ -157,10 +157,10 @@ year and would otherwise be verified by waiting for it.
 
 ### Building it
 
-**Two days, one engineer, working with an AI coding assistant.** That produced
-7,484 lines of application code and 3,596 lines of tests. The 165 tests cover
-the scheduling rules, the database guarantees, the isolation between practices,
-and both calendar integrations.
+**Three and a half days, one engineer, working with an AI coding assistant.**
+That produced 7,915 lines of application code and 4,041 lines of tests. The 179
+tests cover the scheduling rules, the database guarantees, the isolation
+between practices, both calendar integrations, and the speech layer.
 
 What is missing matters more than the number. What exists is a working
 application, operated end to end against real Google and Outlook calendars.
@@ -168,10 +168,11 @@ What does not exist is the work separating that from something a practice can
 be handed, listed in section 6.
 
 Estimating that from this project's own rate rather than from habit puts it at
-**roughly six to ten engineer-days**. The two days above produced more code, more
+**roughly six to ten engineer-days**. The days above produced more code, more
 tests and more integrations than everything still outstanding. An estimate
-should not be several times larger than the work it is smaller than. The two items in section 6 with no estimate
-are larger projects rather than finishing work.
+should not be several times larger than the work it is smaller than. The two
+items in section 6 with no estimate are larger projects rather than finishing
+work.
 
 Three of the remaining items are not bounded by engineering speed at all, and
 those are the ones to start first. Google requires a review before an
