@@ -227,8 +227,9 @@ total of the tokens it has spent, and one request returns the total for any
 period, in tokens and in money.
 
 That was added because the question came up during development and had no
-answer. The provider returns a token count with every reply, and the screen
-even shows it in the corner, but nothing was storing it. Working out what a
+answer. The provider returns a token count with every reply, and the
+development build shows it in the corner of the screen, but nothing was
+storing it. Working out what a
 week of testing had cost meant counting rows in the database and multiplying by
 a price measured once, which gives a range. A practice asking what last month
 cost should get a figure.
@@ -326,6 +327,13 @@ or looked it up with the name and number it was booked under. A reference
 obtained any other way is refused, and refused in exactly the same words as an
 appointment that does not exist, so the refusal cannot be used to discover
 which references are real.
+
+**A patient is shown nothing about the machinery.** Which AI vendor answered,
+which model, and how much of the prompt came from cache are a developer's
+instrument, and they sat in the corner of every patient's screen. They are
+shown in development now, and on a deployed copy only when the address asks
+for them. A patient booking a filling has no use for the model name, and
+nobody outside should have to be told which vendor to study.
 
 **There is no clinical information in the system.** Names, phone numbers and
 email addresses only: no history, no diagnoses, no notes, no payment details.

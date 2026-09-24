@@ -2,6 +2,7 @@ export type Clinic = {
   name: string
   timezone: string
   contact_phone: string | null
+  environment: string
 }
 
 export type Service = {

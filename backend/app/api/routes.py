@@ -48,6 +48,10 @@ class ClinicOut(BaseModel):
     name: str
     timezone: str
     contact_phone: str | None = None
+    # So the client knows whether to show the engine and cache counters. They
+    # are a developer's diagnostic; a patient booking a filling has no use for
+    # the model name and no business knowing which vendor is behind it.
+    environment: str = "production"
 
 
 class ServiceOut(BaseModel):
@@ -89,7 +93,12 @@ async def clinic_info(clinic_id: uuid.UUID = Depends(current_clinic_id)) -> Clin
         clinic = await session.get(models.Clinic, clinic_id)
     if clinic is None:
         raise HTTPException(status_code=404, detail="Clinic not found")
-    return ClinicOut(name=clinic.name, timezone=clinic.timezone, contact_phone=clinic.contact_phone)
+    return ClinicOut(
+        name=clinic.name,
+        timezone=clinic.timezone,
+        contact_phone=clinic.contact_phone,
+        environment=settings.environment,
+    )
 
 
 @router.get("/services", response_model=list[ServiceOut])

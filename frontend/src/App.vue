@@ -48,6 +48,20 @@ const bookings = ref<BookedAppointment[]>([])
 const escalated = ref(false)
 const escalationReason = ref<string | null>(null)
 
+/**
+ * Which engine answered, and how much of the prompt came from cache.
+ *
+ * A developer's instrument, not a patient's. It is the only way to see that
+ * prompt caching is still working, because a cache that has silently stopped
+ * produces no error, only a larger bill and a slower reply. It also names the
+ * vendor and the model, which a patient booking a filling has no use for and
+ * an attacker would rather not have to guess.
+ *
+ * So it is shown in development, and on demand anywhere with ?debug in the
+ * address, which is how it gets demonstrated on a deployed copy.
+ */
+const showDiagnostics = ref(false)
+
 const provider = ref('')
 const model = ref('')
 const cachedTokens = ref(0)
@@ -151,6 +165,9 @@ onMounted(async () => {
       getVoiceStatus().catch(() => ({ available: false, stt: '', tts: '' })),
     ])
     voiceAvailable.value = voiceStatus.available
+    showDiagnostics.value =
+      clinic.environment !== 'production' ||
+      new URLSearchParams(window.location.search).has('debug')
     clinicName.value = clinic.name
     contactPhone.value = clinic.contact_phone
     setClinicTimeZone(clinic.timezone)
@@ -175,7 +192,7 @@ onMounted(async () => {
       <p v-if="contactPhone" class="urgent-line">
         In an emergency, call <strong>{{ contactPhone }}</strong>
       </p>
-      <p v-if="provider" class="engine">
+      <p v-if="showDiagnostics && provider" class="engine">
         {{ provider }} · {{ model }}
         <span v-if="cachedTokens" class="cache">{{ cachedTokens }} cached</span>
       </p>

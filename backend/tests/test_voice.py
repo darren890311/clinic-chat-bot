@@ -239,6 +239,25 @@ def client():
     get_settings.cache_clear()
 
 
+def test_the_clinic_tells_the_client_whether_to_show_diagnostics() -> None:
+    """The engine name and cache counter are a developer's instrument.
+
+    They sat in the corner of every patient's screen, naming the vendor and
+    the model to somebody who came to book a filling. The client needs to know
+    where it is running before it can decide, and only the server knows that.
+
+    Checked on the response model rather than through a request: the field
+    existing is the contract, and the client reads nothing else to make the
+    decision.
+    """
+    from app.api.routes import ClinicOut
+
+    assert "environment" in ClinicOut.model_fields
+    assert ClinicOut.model_fields["environment"].default == "production", (
+        "an unset environment must mean hide it, not show it"
+    )
+
+
 def test_the_client_can_ask_whether_the_microphone_is_worth_offering(client) -> None:
     """A button that looks live and is not is worse than no button."""
     body = client.get("/api/voice").json()
