@@ -13,13 +13,15 @@ The one thing that matters typographically is the architecture diagram: it is
 drawn with characters, so it has to stay in a monospaced font at a size where
 the boxes still line up. Everything else is ordinary prose.
 
-    python -m scripts.render_docs
+    python -m scripts.render_docs                  # everything in docs/
+    python -m scripts.render_docs demo-script.md   # one named file
 """
 
 from __future__ import annotations
 
 import html
 import re
+import sys
 from pathlib import Path
 
 DOCS = Path(__file__).resolve().parent.parent / "docs"
@@ -93,7 +95,11 @@ def render(md: str) -> str:
     def flush() -> None:
         nonlocal para, first_para
         if para:
-            klass = ' class="lede"' if first_para and out and out[0].startswith("<h1") else ""
+            klass = (
+                ' class="lede"'
+                if first_para and out and out[0].startswith("<h1")
+                else ""
+            )
             out.append(f"<p{klass}>{inline(' '.join(para))}</p>")
             first_para = False
             para = []
@@ -127,7 +133,9 @@ def render(md: str) -> str:
             cells = "".join(f"<th>{inline(c)}</th>" for c in head)
             table = [f"<table><thead><tr>{cells}</tr></thead><tbody>"]
             for row in body:
-                table.append("<tr>" + "".join(f"<td>{inline(c)}</td>" for c in row) + "</tr>")
+                table.append(
+                    "<tr>" + "".join(f"<td>{inline(c)}</td>" for c in row) + "</tr>"
+                )
             table.append("</tbody></table>")
             out.append("".join(table))
 
@@ -174,8 +182,14 @@ def render(md: str) -> str:
     return "\n".join(out)
 
 
-def main() -> None:
-    for source in sorted(DOCS.glob("*.md")):
+def main(argv: list[str] | None = None) -> None:
+    args = argv if argv is not None else sys.argv[1:]
+    # Named files override the default sweep, so a working document that is
+    # not a deliverable can borrow the same typesetting without living in
+    # docs/ and being mistaken for one.
+    sources = [Path(a) for a in args] if args else sorted(DOCS.glob("*.md"))
+
+    for source in sources:
         body = render(source.read_text())
         title = html.escape(source.stem.replace("-", " ").title())
         page = (
