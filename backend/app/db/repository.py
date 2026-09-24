@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, time
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import and_, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,21 +80,40 @@ async def load_schedules(
     window: Interval,
     service_code: str | None = None,
     exclude_appointment_id: uuid.UUID | None = None,
+    now: datetime | None = None,
 ) -> list[PractitionerSchedule]:
     """Practitioners plus every block of time they are already committed for.
 
     Internal bookings only. The booking service layers external calendar busy on
     top, fetched live per request.
+
+    A hold occupies its slot only while its expiry is in the future. Holds are
+    swept to `expired` inside `create_hold`, but nothing sweeps on the way in
+    to a search, so a lapsed hold that nobody had booked over yet went on
+    blocking its slot: a patient whose own reservation had run out was told the
+    time was taken, and so was everybody else, until some unrelated booking
+    happened to clear it. Judged here rather than swept here, because a search
+    is a read and should not have to write to tell the truth.
     """
+    # Injected rather than read from the database clock, so the same rule can
+    # be tested at a chosen instant. The engine above holds to that too.
+    now = now or datetime.now(UTC)
+
     stmt = select(models.Practitioner).where(models.Practitioner.is_active.is_(True))
     if service_code:
         stmt = stmt.where(models.Practitioner.service_codes.any(service_code))
     practitioners = list((await session.execute(stmt)).scalars())
 
     occupied = select(models.Appointment).where(
-        models.Appointment.status.in_(OCCUPYING),
         models.Appointment.ends_at > window.start,
         models.Appointment.starts_at < window.end,
+        or_(
+            models.Appointment.status == "confirmed",
+            and_(
+                models.Appointment.status == "held",
+                models.Appointment.hold_expires_at > now,
+            ),
+        ),
     )
     if exclude_appointment_id is not None:
         # Confirming a hold must not treat that hold as a conflict with itself.

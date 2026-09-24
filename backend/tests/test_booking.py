@@ -467,6 +467,50 @@ async def test_a_calendar_that_fails_to_mirror_does_not_lose_the_booking(session
 # --- cancellation ----------------------------------------------------------
 
 
+async def test_a_lapsed_hold_stops_blocking_before_anyone_sweeps_it(session) -> None:
+    """A search is a read, and it has to tell the truth without writing first.
+
+    Holds are swept to `expired` inside `create_hold`. Nothing sweeps on the
+    way in to a search, so a lapsed hold that nobody had booked over went on
+    occupying its slot: the patient whose own reservation had run out was told
+    the time was taken, and so was everybody else, until some unrelated
+    booking happened to clear it.
+
+    Watching a reservation lapse in the browser is what found it. The
+    assistant offered to hold the slot again, did so, let that one lapse too,
+    and then said the time "has since been taken".
+    """
+    hold = await booking.create_hold(
+        session, CLINIC, service_code="A", practitioner_slug="dr-senior", starts_at=_monday(9)
+    )
+
+    # Still live: the slot is genuinely occupied.
+    _, live = await booking.find_availability(
+        session,
+        CLINIC,
+        service_code="A",
+        practitioner_slug="dr-senior",
+        search=Interval(_monday(9), _monday(11)),
+        now=hold.hold_expires_at - timedelta(seconds=1),
+    )
+    assert _monday(9) not in [s.start for s in live]
+
+    # A second past its expiry, with the row untouched and still marked held.
+    later = hold.hold_expires_at + timedelta(seconds=1)
+    await session.refresh(hold)
+    assert hold.status == "held", "nothing has swept it, which is the point"
+
+    _, after = await booking.find_availability(
+        session,
+        CLINIC,
+        service_code="A",
+        practitioner_slug="dr-senior",
+        search=Interval(_monday(9), _monday(11)),
+        now=later,
+    )
+    assert _monday(9) in [s.start for s in after], "a lapsed hold holds nothing"
+
+
 async def test_cancelling_frees_the_slot_for_someone_else(session) -> None:
     hold = await booking.create_hold(
         session, CLINIC, service_code="A", practitioner_slug="dr-senior", starts_at=_monday(9)

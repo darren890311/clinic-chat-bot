@@ -88,6 +88,7 @@ async def find_availability(
         window=search,
         practitioner_slug=practitioner_slug,
         exclude_appointment_id=moving_appointment_id,
+        now=now,
     )
     slots = compute_availability(
         service=service,
@@ -136,6 +137,7 @@ async def create_hold(
         starts_at=starts_at,
         # The appointment being given up must not block the one replacing it.
         exclude_appointment_id=replaces_appointment_id,
+        now=now,
     )
 
     slot = Slot(
@@ -242,6 +244,7 @@ async def confirm_appointment(
         starts_at=hold.starts_at,
         # The hold itself occupies this slot; it must not conflict with itself.
         exclude_appointment_id=hold.id,
+        now=now,
     )
 
     slot = Slot(
@@ -411,6 +414,7 @@ async def _context(
     window: Interval,
     practitioner_slug: str | None = None,
     exclude_appointment_id: uuid.UUID | None = None,
+    now: datetime | None = None,
 ) -> tuple[Service, SchedulingPolicy, list[PractitionerSchedule]]:
     """Assemble everything the engine needs, including live external busy."""
     services = await repo.load_services(session, clinic_id)
@@ -428,6 +432,7 @@ async def _context(
         window=window,
         service_code=code,
         exclude_appointment_id=exclude_appointment_id,
+        now=now,
     )
     if practitioner_slug:
         schedules = [s for s in schedules if s.practitioner.slug == practitioner_slug]
@@ -469,6 +474,7 @@ async def _practitioner_context(
     practitioner_slug: str | None = None,
     practitioner_id: uuid.UUID | None = None,
     exclude_appointment_id: uuid.UUID | None = None,
+    now: datetime | None = None,
 ) -> tuple[Service, SchedulingPolicy, PractitionerSchedule]:
     """The single-practitioner view used by hold and confirm.
 
@@ -506,6 +512,7 @@ async def _practitioner_context(
         window=window,
         service_code=code,
         exclude_appointment_id=exclude_appointment_id,
+        now=now,
     )
     schedule = next((s for s in schedules if s.practitioner.slug == practitioner_slug), None)
     if schedule is None:
