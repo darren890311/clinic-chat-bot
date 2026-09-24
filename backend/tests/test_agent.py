@@ -768,6 +768,83 @@ async def test_an_untouched_conversation_has_recorded_nothing(session) -> None:
     assert conversation.output_tokens == reply.usage.output_tokens
 
 
+async def test_a_lapsed_hold_is_corrected_at_the_end_of_the_conversation(
+    session,
+) -> None:
+    """Where the correction sits is the whole of this fix.
+
+    Said in the per-turn context, which precedes the transcript, it was
+    ignored: the transcript contains the assistant's own "a confirmation form
+    is on your screen", and that is the most recent and most concrete thing it
+    can read. A patient whose hold had lapsed was told twice more to fill in a
+    form that had gone from their screen minutes earlier.
+
+    So it is appended last, where a correction has to go, and only when there
+    is something to correct.
+    """
+    hold = models.Appointment(
+        id=uuid.uuid4(),
+        clinic_id=CLINIC,
+        practitioner_id=SENIOR,
+        service_code="A",
+        starts_at=monday(9),
+        ends_at=monday(10),
+        status="held",
+        hold_expires_at=NOW - timedelta(minutes=3),
+    )
+    session.add(hold)
+    await session.flush()
+
+    provider = ScriptedProvider([says("That hold lapsed. Shall I take it again?")])
+    reply = await Agent(provider).respond(session, CLINIC, text="is it booked?", now=NOW)
+
+    hold.conversation_id = reply.conversation_id
+    await session.flush()
+
+    provider = ScriptedProvider([says("ok")])
+    await Agent(provider).respond(
+        session,
+        CLINIC,
+        text="hello?",
+        conversation_id=reply.conversation_id,
+        now=NOW,
+    )
+
+    last = provider.seen_transcripts[-1][-1]
+    assert "expired 3 minutes ago" in last.content
+    assert "out of date" in last.content, "it has to disown what it said before"
+
+    # And not persisted. A third turn is what shows it: if the note were
+    # written to the transcript, this turn would carry both the stored copy
+    # and the fresh one, and the model would read about the same lapse twice.
+    provider = ScriptedProvider([says("ok")])
+    await Agent(provider).respond(
+        session,
+        CLINIC,
+        text="right",
+        conversation_id=reply.conversation_id,
+        now=NOW,
+    )
+    notes = [
+        m
+        for m in provider.seen_transcripts[-1]
+        if isinstance(getattr(m, "content", None), str) and "[Practice system]" in m.content
+    ]
+    assert len(notes) == 1, f"one fresh note, never a stored one; got {len(notes)}"
+
+
+async def test_no_correction_when_there_is_nothing_to_correct(session) -> None:
+    """A conversation that never held anything gets no system note."""
+    provider = ScriptedProvider([says("Hello.")])
+    await Agent(provider).respond(session, CLINIC, text="hi", now=NOW)
+
+    assert not any(
+        "[Practice system]" in m.content
+        for m in provider.seen_transcripts[-1]
+        if isinstance(getattr(m, "content", None), str)
+    )
+
+
 # --- failure modes -----------------------------------------------------------
 
 

@@ -124,6 +124,36 @@ async def practitioner_ids_by_slug(
     return {r.slug: r.id for r in rows}
 
 
+async def lock_practitioner(
+    session: AsyncSession, clinic_id: uuid.UUID, *, slug: str
+) -> uuid.UUID | None:
+    """Take the practitioner's row for the rest of this transaction.
+
+    Holds for one practitioner then queue instead of colliding. Without it,
+    two simultaneous requests for the same slot each swept expired holds and
+    then inserted, touching the same rows in whatever order they arrived in,
+    and Postgres broke the tie by killing one with a deadlock.
+
+    A deadlock is worse than losing a race. Losing a race aborts a savepoint
+    and the conversation carries on to offer another time; a deadlock aborts
+    the whole transaction, so there is nothing left to carry on with. Queuing
+    turns it back into an ordinary lost race.
+
+    Holds are short and the row is never held for long, so the queue is a few
+    milliseconds even when a popular slot is contested.
+    """
+    return (
+        await session.execute(
+            select(models.Practitioner.id)
+            .where(
+                models.Practitioner.clinic_id == clinic_id,
+                models.Practitioner.slug == slug,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+
+
 async def expire_stale_holds(session: AsyncSession) -> int:
     """Release holds whose TTL has passed.
 
@@ -509,6 +539,31 @@ async def mark_escalated(session: AsyncSession, *, conversation_id: uuid.UUID, r
     conversation.escalation_reason = reason
     if conversation.escalated_at is None:
         conversation.escalated_at = datetime.now(UTC)
+
+
+async def lapsed_hold_for_conversation(
+    session: AsyncSession, *, conversation_id: uuid.UUID, now: datetime
+) -> models.Appointment | None:
+    """The most recent hold this conversation placed and then let go.
+
+    Told only that nothing is held, a model reads its own transcript saying
+    "Held: Crown Fitting with Dr. Hale" and believes that instead. A hedge
+    makes it worse: "either booked or expired" offers two possibilities and
+    names neither, so the concrete sentence wins. This is what lets the turn
+    say which one happened, and to what.
+    """
+    return (
+        await session.execute(
+            select(models.Appointment)
+            .where(
+                models.Appointment.conversation_id == conversation_id,
+                models.Appointment.status.in_(("held", "expired")),
+                models.Appointment.hold_expires_at <= now,
+            )
+            .order_by(models.Appointment.hold_expires_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
 
 async def active_hold_for_conversation(

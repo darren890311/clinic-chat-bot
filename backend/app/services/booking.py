@@ -119,6 +119,11 @@ async def create_hold(
     """
     now = now or datetime.now(UTC)
 
+    # Everything below writes. Taking the practitioner's row first makes two
+    # requests for the same slot queue rather than collide: see
+    # `lock_practitioner` for why a deadlock is worse than a lost race.
+    await repo.lock_practitioner(session, clinic_id, slug=practitioner_slug)
+
     # Release anything whose TTL has passed before consulting the constraint,
     # or a patient who hesitated would keep the slot until someone noticed.
     await repo.expire_stale_holds(session)

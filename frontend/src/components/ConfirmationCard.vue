@@ -14,7 +14,7 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { confirmBooking, formatTime, formatWhen, type PendingHold } from '../api'
 
 const props = defineProps<{ hold: PendingHold }>()
-const emit = defineEmits<{ booked: []; expired: [] }>()
+const emit = defineEmits<{ booked: [] }>()
 
 const fullName = ref('')
 const phone = ref('')
@@ -29,7 +29,11 @@ let ticker: number | undefined
 function tick() {
   const left = Math.max(0, new Date(props.hold.expires_at).getTime() - Date.now())
   remaining.value = Math.floor(left / 1000)
-  if (left === 0) emit('expired')
+  // Stop at zero rather than telling the parent to remove the card. It used
+  // to be destroyed here, which made the expired notice below unreachable:
+  // the countdown hit zero, the form vanished without a word, and the patient
+  // was left reading a conversation that said a form was on their screen.
+  if (left === 0) window.clearInterval(ticker)
 }
 
 watch(
@@ -77,7 +81,7 @@ async function submit() {
 </script>
 
 <template>
-  <section class="card" aria-labelledby="confirm-heading">
+  <section class="card" :class="{ lapsed: remaining === 0 }" aria-labelledby="confirm-heading">
     <header class="head">
       <h2 id="confirm-heading">Confirm your appointment</h2>
       <span class="hold" :class="{ urgent: runningOut }" role="timer">
@@ -113,13 +117,21 @@ async function submit() {
         {{ submitting ? 'Booking…' : 'Confirm booking' }}
       </button>
       <p v-if="remaining === 0" class="error" role="alert">
-        This reservation has expired. Ask for another time.
+        This reservation has expired and the time is free again. Ask for
+        another one, or for the same time back.
       </p>
     </form>
   </section>
 </template>
 
 <style scoped>
+.card.lapsed {
+  border-color: var(--border);
+  opacity: 0.72;
+}
+.card.lapsed h2 {
+  color: var(--muted);
+}
 .card {
   border: 1px solid var(--accent);
   border-radius: 10px;

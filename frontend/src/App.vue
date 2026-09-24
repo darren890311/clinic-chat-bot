@@ -200,7 +200,13 @@ onMounted(async () => {
 
       <p v-if="sending" class="thinking">…</p>
 
-      <ConfirmationCard v-if="hold" :hold="hold" @booked="onBooked" @expired="hold = null" />
+      <!-- Deliberately not removed when it expires. The card's own expired
+           state was unreachable: destroying it here meant the countdown hit
+           zero, the form vanished, and the patient was left looking at a
+           conversation that said a form was on their screen. It stays,
+           says it has expired, and disappears on the next turn when the
+           server reports no hold. -->
+      <ConfirmationCard v-if="hold" :hold="hold" @booked="onBooked" />
 
       <div v-for="b in bookings" :key="b.appointment_id" class="booked">
         <p class="booked-head"><strong>Booked</strong> {{ b.service_name }}</p>

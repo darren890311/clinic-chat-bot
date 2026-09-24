@@ -142,10 +142,15 @@ class Agent:
             )
 
         system = await self._system_prompt(session, clinic_id, now=now)
-        turn_context = await self._context(
+        turn_context, correction = await self._context(
             session, clinic_id, conversation_id=conversation.id, now=now
         )
         transcript = await self._transcript(session, conversation_id=conversation.id)
+        if correction is not None:
+            # Appended last, so it is the nearest thing to the reply being
+            # written, and not persisted: it describes this instant, and
+            # replaying it next turn would report a lapse already dealt with.
+            transcript.append(Message(role="user", content=correction))
 
         tool_context = agent_tools.ToolContext(
             session=session,
@@ -349,7 +354,7 @@ class Agent:
         *,
         conversation_id: uuid.UUID,
         now: datetime,
-    ) -> str:
+    ) -> tuple[str, str | None]:
         """Per-turn facts the model needs but must not cache.
 
         Booking state is included because the assistant cannot see the
@@ -363,6 +368,7 @@ class Agent:
         policy = await repo.load_policy(session, clinic_id)
         local = now.astimezone(policy.tz)
         lines = [f"The current date and time at the practice is {local:%A %d %B %Y, %-I:%M %p}."]
+        correction: str | None = None
 
         services = await repo.load_services(session, clinic_id)
 
@@ -408,17 +414,43 @@ class Agent:
                 f"booked until they submit that form."
             )
         else:
-            # Stated rather than omitted. The transcript still contains the
-            # assistant's own earlier "held, ask them to confirm", and silence
-            # does not override a sentence the model can still read. An
-            # explicit negative does.
-            lines.append(
-                "No slot is currently held, and no confirmation form is on the "
-                "patient's screen. Any hold you placed earlier has either become "
-                "one of the booked appointments above or expired."
+            # Stated rather than omitted, and stated specifically. The
+            # transcript still contains the assistant's own "Held: Crown
+            # Fitting with Dr. Hale", and silence does not override a sentence
+            # the model can still read. Nor does a hedge: "either booked or
+            # expired" gave it two possibilities and named neither, so it kept
+            # telling a patient to fill in a form that had gone from the
+            # screen several minutes earlier.
+            lapsed = await repo.lapsed_hold_for_conversation(
+                session, conversation_id=conversation_id, now=now
             )
+            if lapsed is not None and not any(a.id == lapsed.id for a in confirmed):
+                ago = max(1, int((now - lapsed.hold_expires_at).total_seconds() // 60))
+                plural = "" if ago == 1 else "s"
+                # Returned separately, to be placed at the end of the
+                # conversation rather than in this block.
+                #
+                # Said here it was ignored, twice over. This context sits
+                # before the whole transcript, and the transcript contains the
+                # assistant's own "a confirmation form has appeared on your
+                # screen" — the most recent and most concrete thing it can
+                # read. A distant instruction loses to a nearby fact, so a
+                # correction has to go where corrections go: last.
+                correction = (
+                    f"[Practice system] The slot you held ({describe(lapsed)}) "
+                    f"expired {ago} minute{plural} ago because the form was "
+                    f"not submitted. It is no longer reserved, the form has "
+                    f"gone from the patient's screen, and the time is free for "
+                    f"anyone. Anything you said earlier about a form being on "
+                    f"their screen is now out of date. Tell them it lapsed, "
+                    f"and offer to hold it again if they still want it."
+                )
+            else:
+                lines.append(
+                    "No slot is currently held and no confirmation form is on the patient's screen."
+                )
 
-        return "\n".join(lines)
+        return "\n".join(lines), correction
 
     async def _transcript(
         self, session: AsyncSession, *, conversation_id: uuid.UUID
