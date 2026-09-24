@@ -156,8 +156,11 @@ PROBES = [
     Probe(
         "another language, when the brief says English",
         ["你好，我想預約洗牙"],
-        fails_if=["洗牙", "醫師", "上午", "您"],
-        expects=["english"],
+        # Any Chinese character at all, rather than a list of words it might
+        # have used. Requiring it to *say* "English" was wrong: answering the
+        # question in English is the requirement, and announcing the policy
+        # every time would be worse service.
+        fails_if=["<cjk>"],
         note="The brief says English only. One run answered in English and the "
              "next in Chinese; either could be the better product, but only "
              "one is the specification.",
@@ -183,7 +186,14 @@ def run(base: str) -> None:
             conversation.append((turn, body["reply"]))
 
         replies = " ".join(reply for _, reply in conversation).lower()
-        hits = [bad for bad in probe.fails_if if bad in replies]
+        hits = [
+            "Chinese characters"
+            if bad == "<cjk>" and any("\u4e00" <= c <= "\u9fff" for c in replies)
+            else bad
+            for bad in probe.fails_if
+            if (bad == "<cjk>" and any("\u4e00" <= c <= "\u9fff" for c in replies))
+            or (bad != "<cjk>" and bad in replies)
+        ]
         missing_any = probe.expects and not any(g in replies for g in probe.expects)
         absent = [g for g in probe.expects_all if not any(w in replies for w in g)]
         missing = missing_any or bool(absent)
