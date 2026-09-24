@@ -224,7 +224,9 @@ is what buys backups and the ability to restore to a point in time.
 
 **The bill is measured, not estimated.** Every conversation keeps a running
 total of the tokens it has spent, and one request returns the total for any
-period, in tokens and in money.
+period, in tokens and, once a price is configured, in money. Without one it
+reports tokens alone, because a price that has gone stale would be quoted as
+fact.
 
 That was added because the question came up during development and had no
 answer. The provider returns a token count with every reply, and the
@@ -233,12 +235,6 @@ storing it. Working out what a
 week of testing had cost meant counting rows in the database and multiplying by
 a price measured once, which gives a range. A practice asking what last month
 cost should get a figure.
-
-Prices are configuration and default to unset, in which case the endpoint
-reports tokens and no money. A wrong price would be quoted; a missing one
-prompts somebody to enter the current rate. Cache writes are counted
-separately from cache reads. A write bills at 1.25 times the input rate and a
-read at about a tenth of it, so averaging the two would flatter the figure.
 
 **Maintenance is people, not machines.** The things that will genuinely need
 attention are the calendar providers occasionally changing their interfaces,
