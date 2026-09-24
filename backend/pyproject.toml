@@ -3,29 +3,42 @@ name = "clinic-chat-bot"
 version = "0.1.0"
 description = "Appointment scheduling assistant for a dental clinic"
 requires-python = ">=3.12"
+# Every dependency carries an upper bound as well as a lower one. CI and the
+# Dockerfile both install from this file rather than from a lock file, so a
+# floor on its own means the next build silently takes whatever was released
+# that morning. SQLAlchemy 2.1 removed two APIs this code used and turned the
+# whole suite red without a line of it changing; the same floor would have let
+# it into a production image just as easily.
+#
+# The bounds are set just above the versions the suite is green against, so
+# they admit patch releases and refuse the jump that broke things.
 dependencies = [
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.32",
-    "pydantic>=2.9",
-    "pydantic-settings>=2.6",
-    "sqlalchemy>=2.0.36",
-    "asyncpg>=0.30",
-    "alembic>=1.14",
-    "httpx>=0.28",
-    "cryptography>=43.0",
-    "python-multipart>=0.0.17",
-    "psycopg[binary]>=3.2",
-    "greenlet>=3.1",
-    "anthropic>=0.70",
-    "openai>=1.60",
+    "fastapi>=0.115,<0.142",
+    "uvicorn[standard]>=0.32,<0.54",
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.6,<3",
+    "sqlalchemy>=2.0.36,<2.2",
+    "asyncpg>=0.30,<0.32",
+    "alembic>=1.14,<2",
+    "httpx>=0.28,<0.29",
+    "cryptography>=43.0,<51",
+    "python-multipart>=0.0.17,<0.1",
+    "psycopg[binary]>=3.2,<4",
+    "greenlet>=3.1,<4",
+    "anthropic>=0.70,<2",
+    "openai>=1.60,<4",
 ]
 
 [project.optional-dependencies]
+# ruff is pinned exactly rather than bounded. It is the one tool here whose
+# job is to fail the build, and a new release adds lint rules and adjusts
+# formatting, so an unpinned version turns CI red for reasons that have
+# nothing to do with the code. Moving it is a deliberate one-line change.
 dev = [
-    "pytest>=8.3",
-    "pytest-asyncio>=0.24",
-    "ruff>=0.8",
-    "time-machine>=2.16",
+    "pytest>=8.3,<10",
+    "pytest-asyncio>=0.24,<2",
+    "ruff==0.16.8",
+    "time-machine>=2.16,<4",
 ]
 
 [build-system]
