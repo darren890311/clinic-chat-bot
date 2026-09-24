@@ -502,9 +502,13 @@ async def _hold_slot(args: dict[str, Any], ctx: ToolContext) -> str:
         # timezone mistake behind a plausible-sounding business answer, and the
         # assistant repeated it to the patient as fact.
         raise errors.SlotUnavailable(
-            f"{_when(starts_at, ctx)} is not available. "
-            "Check you sent a clinic local time with no timezone offset, then "
-            "call find_availability again if needed."
+            f"{_when(starts_at, ctx)} is not available. You do not know why, so "
+            "do not tell the patient why. It may have been taken, it may be "
+            "outside working hours, or this practitioner may not perform this "
+            "treatment. Saying it 'has just gone' invents a story: that time "
+            "may never have been free. Say it is not available and offer what "
+            "is. Check you sent a clinic local time with no timezone offset, "
+            "then call find_availability again if needed."
         ) from None
     held_for = int((hold.hold_expires_at - ctx.now).total_seconds() // 60)
     moving = (

@@ -349,6 +349,37 @@ async def test_the_model_is_only_ever_offered_appointment_tools(session) -> None
     ]
 
 
+async def test_the_brief_forbids_inventing_why_a_time_went(session) -> None:
+    """Asked for a slot a conference was already covering, it said the time
+    "has just gone in the meantime". Nothing had gone: it had never been free.
+
+    The tool says a time is unavailable without saying why, because it often
+    cannot tell. The model filled the gap with a plausible story, which is the
+    one thing it must not do with a fact a patient will act on.
+    """
+    provider = ScriptedProvider([says("ok")])
+    await Agent(provider).respond(session, CLINIC, text="hello", now=NOW)
+
+    prompt = provider.seen_system.lower()
+    assert "do not explain why it went" in prompt
+    assert "a guess sounds" in prompt
+
+
+async def test_the_brief_says_when_offered_times_are_only_the_nearest(
+    session,
+) -> None:
+    """Offering the two slots either side of a full one reads as the only two.
+
+    The tool had returned every morning as well. "The nearest are 12:45 and
+    4:15" was true and sent away a patient who would have taken ten o'clock.
+    """
+    provider = ScriptedProvider([says("ok")])
+    await Agent(provider).respond(session, CLINIC, text="hello", now=NOW)
+
+    prompt = provider.seen_system.lower()
+    assert "the nearest to what they asked for" in prompt
+
+
 async def test_the_brief_pins_the_reply_language(session) -> None:
     """The brief for this practice says English only, and the model drifted.
 
