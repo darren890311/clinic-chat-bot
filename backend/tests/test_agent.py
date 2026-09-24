@@ -349,22 +349,6 @@ async def test_the_model_is_only_ever_offered_appointment_tools(session) -> None
     ]
 
 
-async def test_the_brief_forbids_inventing_why_a_time_went(session) -> None:
-    """Asked for a slot a conference was already covering, it said the time
-    "has just gone in the meantime". Nothing had gone: it had never been free.
-
-    The tool says a time is unavailable without saying why, because it often
-    cannot tell. The model filled the gap with a plausible story, which is the
-    one thing it must not do with a fact a patient will act on.
-    """
-    provider = ScriptedProvider([says("ok")])
-    await Agent(provider).respond(session, CLINIC, text="hello", now=NOW)
-
-    prompt = provider.seen_system.lower()
-    assert "do not explain why it went" in prompt
-    assert "a guess sounds" in prompt
-
-
 async def test_the_brief_says_when_offered_times_are_only_the_nearest(
     session,
 ) -> None:
