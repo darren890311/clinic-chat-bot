@@ -206,6 +206,21 @@ class AppointmentOut(BaseModel):
     mirror_error: str | None = None
 
 
+async def _as_clinic_time(session, clinic_id: uuid.UUID, when: datetime) -> datetime:
+    """Read a time without an offset as the practice's own clock.
+
+    A caller who writes 2pm means two in the afternoon at the practice, not two
+    in the afternoon wherever the server happens to be. Without this the value
+    reached the scheduler naive and raised, which arrived as a 500 and a stack
+    trace where a readable answer belongs. The assistant's own tools have
+    always applied this rule; the endpoint had not.
+    """
+    if when.tzinfo is not None:
+        return when
+    policy = await repo.load_policy(session, clinic_id)
+    return when.replace(tzinfo=policy.tz).astimezone(UTC)
+
+
 def _booking_http_error(exc: errors.BookingError) -> HTTPException:
     """Domain errors carry their own status and a message safe to read aloud."""
     return HTTPException(status_code=exc.status_code, detail=exc.message)
@@ -245,13 +260,14 @@ async def create_hold(
     and the slot has to be theirs while they take it.
     """
     async with tenant_session(clinic_id) as session:
+        starts_at = await _as_clinic_time(session, clinic_id, body.starts_at)
         try:
             hold = await booking.create_hold(
                 session,
                 clinic_id,
                 service_code=body.service_code,
                 practitioner_slug=body.practitioner_slug,
-                starts_at=body.starts_at,
+                starts_at=starts_at,
                 conversation_id=body.conversation_id,
             )
         except errors.BookingError as exc:

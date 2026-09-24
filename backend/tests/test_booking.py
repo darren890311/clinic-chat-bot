@@ -12,6 +12,7 @@ retried request arrives after the response was lost.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -603,6 +604,89 @@ async def test_a_lost_race_leaves_the_session_usable() -> None:
         await engine.dispose()
 
 
+async def test_two_requests_racing_leave_one_winner_and_one_sentence() -> None:
+    """Two connections, not two calls on one. That is what the API does.
+
+    The existing race test uses a single session, where the second attempt is
+    refused by the engine before it ever reaches the database. The real thing
+    needs two transactions open at once: both read availability before either
+    has committed, both pass their engine checks, and Postgres decides.
+
+    Fired at the running API, that produced a 200 and a 500. The constraint had
+    done its job and only one hold existed, but the loser got a server error,
+    because the savepoint cleanup expunged a row the rollback had already
+    removed and that second exception replaced the domain error. A losing race
+    is an ordinary event in a booking conversation. It has to arrive as a
+    sentence.
+    """
+    engine = create_async_engine(_async_url(APP_URL), poolclass=NullPool)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    clinic = uuid.uuid4()
+
+    async def scoped(s):
+        await s.execute(text("SELECT set_config('app.clinic_id', :c, true)"), {"c": str(clinic)})
+
+    try:
+        async with factory() as s, s.begin():
+            await scoped(s)
+            s.add(
+                models.Clinic(
+                    id=clinic,
+                    slug=f"race2-{clinic.hex[:8]}",
+                    name="Race Dental",
+                    timezone="America/New_York",
+                    scheduling_policy={},
+                )
+            )
+            s.add(
+                models.Service(
+                    clinic_id=clinic,
+                    code="A",
+                    name="Routine Cleaning",
+                    duration_minutes=60,
+                    description="",
+                )
+            )
+            s.add(
+                models.Practitioner(
+                    id=uuid.uuid4(),
+                    clinic_id=clinic,
+                    slug="dr-race",
+                    name="Dr. Race",
+                    title="Dentist",
+                    seniority="senior",
+                    service_codes=["A"],
+                    working_windows=WINDOWS,
+                )
+            )
+
+        async def attempt():
+            async with factory() as s, s.begin():
+                await scoped(s)
+                try:
+                    await booking.create_hold(
+                        s,
+                        clinic,
+                        service_code="A",
+                        practitioner_slug="dr-race",
+                        starts_at=_monday(9),
+                    )
+                    return "held"
+                except errors.SlotUnavailable as exc:
+                    return str(exc)
+
+        outcomes = await asyncio.wait_for(asyncio.gather(attempt(), attempt()), timeout=30)
+
+        assert outcomes.count("held") == 1, f"exactly one winner, got {outcomes}"
+        loser = next(o for o in outcomes if o != "held")
+        assert "booked that time" in loser, f"the loser needs a sentence, got {loser!r}"
+    finally:
+        async with factory() as s, s.begin():
+            await scoped(s)
+            await s.execute(text("DELETE FROM appointments WHERE clinic_id = :c"), {"c": clinic})
+        await engine.dispose()
+
+
 async def test_an_appointment_can_move_to_an_overlapping_time(session) -> None:
     """The case the exclusion constraint made impossible.
 
@@ -731,3 +815,29 @@ async def test_a_lookup_name_matches_on_words_rather_than_on_substrings(session)
     assert not repo.name_matches("Darren Smith", "Darren Chen")
     assert not repo.name_matches("Dar", "Darren Chen")
     assert not repo.name_matches("", "Darren Chen"), "a blank name must not match everyone"
+
+
+async def test_a_time_without_a_timezone_is_read_as_the_practice_clock(session) -> None:
+    """A caller who writes 2pm means two in the afternoon at the practice.
+
+    Firing two simultaneous holds at the running API to see what the database
+    would do, the request instead produced a 500 and a stack trace: the value
+    reached the scheduler with no timezone and raised there. The assistant's
+    own tools had always read a bare time as clinic-local. The endpoint had
+    not, so anyone using the API directly got a crash where a readable answer
+    belongs.
+    """
+    from datetime import datetime as _dt
+
+    from app.api.routes import _as_clinic_time
+
+    naive = _dt(2026, 10, 5, 14, 0)
+    resolved = await _as_clinic_time(session, CLINIC, naive)
+
+    assert resolved.tzinfo is not None
+    policy = await repo.load_policy(session, CLINIC)
+    assert resolved.astimezone(policy.tz).hour == 14, "2pm at the practice, not 2pm UTC"
+
+    # An offset the caller supplied is theirs and is left alone.
+    aware = _dt(2026, 10, 5, 14, 0, tzinfo=UTC)
+    assert await _as_clinic_time(session, CLINIC, aware) == aware

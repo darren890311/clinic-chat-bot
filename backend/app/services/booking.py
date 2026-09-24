@@ -378,10 +378,18 @@ async def _flush_or_conflict(
         async with session.begin_nested():
             await session.flush()
     except IntegrityError as exc:
-        # The savepoint is rolled back, but the rejected row is still pending in
-        # the session's unit of work and the next flush would try it again. It
-        # has to be expunged or the failure follows the request around.
-        if pending is not None:
+        # The savepoint is rolled back, but the rejected row may still be
+        # pending in the session's unit of work, where the next flush would try
+        # it again. It has to be expunged or the failure follows the request
+        # around.
+        #
+        # Whether it is still there depends on how far the flush got before the
+        # constraint fired, and expunging something already gone raises in turn.
+        # That second exception replaced the first: two callers racing for the
+        # same slot produced a 500 for the loser, where the point of the whole
+        # savepoint is that they get "someone just booked that time" and carry
+        # on talking.
+        if pending is not None and pending in session:
             session.expunge(pending)
         if OVERLAP_CONSTRAINT in str(exc.orig):
             raise errors.SlotUnavailable(
