@@ -506,6 +506,7 @@ async def add_usage(session: AsyncSession, *, conversation_id: uuid.UUID, usage:
             input_tokens=models.Conversation.input_tokens + usage.input_tokens,
             output_tokens=models.Conversation.output_tokens + usage.output_tokens,
             cached_tokens=models.Conversation.cached_tokens + usage.cache_read_tokens,
+            cache_write_tokens=(models.Conversation.cache_write_tokens + usage.cache_write_tokens),
         )
     )
 
@@ -519,14 +520,19 @@ async def usage_since(session: AsyncSession, *, since: datetime) -> dict[str, in
                 func.coalesce(func.sum(models.Conversation.input_tokens), 0),
                 func.coalesce(func.sum(models.Conversation.output_tokens), 0),
                 func.coalesce(func.sum(models.Conversation.cached_tokens), 0),
+                func.coalesce(func.sum(models.Conversation.cache_write_tokens), 0),
             ).where(models.Conversation.created_at >= since)
         )
     ).one()
+    # Cast rather than pass through: a SUM over a bigint column comes back as
+    # Decimal, which raises the moment it meets a price as a float. The
+    # endpoint returned a 500 the first time a price was configured.
     return {
-        "conversations": row[0],
-        "input_tokens": row[1],
-        "output_tokens": row[2],
-        "cached_tokens": row[3],
+        "conversations": int(row[0]),
+        "input_tokens": int(row[1]),
+        "output_tokens": int(row[2]),
+        "cached_tokens": int(row[3]),
+        "cache_write_tokens": int(row[4]),
     }
 
 

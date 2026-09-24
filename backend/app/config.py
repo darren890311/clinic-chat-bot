@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     price_input_per_mtok: float = 0.0
     price_output_per_mtok: float = 0.0
     price_cached_per_mtok: float = 0.0
+    # Writes bill above the input rate, so they need their own figure.
+    price_cache_write_per_mtok: float = 0.0
 
     # Shared secret guarding the calendar-connection endpoints. There is no
     # staff login yet, and an unauthenticated endpoint that starts an OAuth flow

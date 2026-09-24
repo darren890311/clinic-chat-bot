@@ -538,6 +538,7 @@ class UsageOut(BaseModel):
     input_tokens: int
     output_tokens: int
     cached_tokens: int
+    cache_write_tokens: int
     # Null when no prices are configured. A wrong number here would be quoted.
     estimated_cost: float | None = None
     currency: str = "USD"
@@ -565,12 +566,14 @@ async def usage(
             settings.price_input_per_mtok,
             settings.price_output_per_mtok,
             settings.price_cached_per_mtok,
+            settings.price_cache_write_per_mtok,
         )
     ):
         cost = round(
             totals["input_tokens"] / 1_000_000 * settings.price_input_per_mtok
             + totals["output_tokens"] / 1_000_000 * settings.price_output_per_mtok
-            + totals["cached_tokens"] / 1_000_000 * settings.price_cached_per_mtok,
+            + totals["cached_tokens"] / 1_000_000 * settings.price_cached_per_mtok
+            + totals["cache_write_tokens"] / 1_000_000 * settings.price_cache_write_per_mtok,
             2,
         )
 

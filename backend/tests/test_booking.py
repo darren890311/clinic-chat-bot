@@ -892,3 +892,27 @@ async def test_a_time_without_a_timezone_is_read_as_the_practice_clock(session) 
     # An offset the caller supplied is theirs and is left alone.
     aware = _dt(2026, 10, 5, 14, 0, tzinfo=UTC)
     assert await _as_clinic_time(session, CLINIC, aware) == aware
+
+
+async def test_usage_totals_come_back_as_numbers_that_can_be_priced(session) -> None:
+    """A SUM over a bigint column is a Decimal, and a price is a float.
+
+    The endpoint returned a 500 the first time prices were configured: the
+    totals had always been correct and had never been multiplied by anything.
+    """
+    from datetime import datetime as _dt
+
+    from app.db import repository as _repo
+
+    totals = await _repo.usage_since(session, since=_dt(2000, 1, 1, tzinfo=UTC))
+    assert set(totals) == {
+        "conversations",
+        "input_tokens",
+        "output_tokens",
+        "cached_tokens",
+        "cache_write_tokens",
+    }
+    for name, value in totals.items():
+        assert isinstance(value, int), f"{name} is {type(value).__name__}"
+        # The operation that failed in production.
+        assert value * 1.5 >= 0

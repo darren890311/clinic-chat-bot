@@ -220,6 +220,8 @@ class Conversation(Base):
     input_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     output_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     cached_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # Billed at 1.25x the input rate, so the most expensive tokens per token.
+    cache_write_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     created_at: Mapped[datetime] = _created_at()
 
 
