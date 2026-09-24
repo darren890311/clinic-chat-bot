@@ -273,7 +273,14 @@ larger piece of engineering and solves a problem this practice does not yet
 have. Timed end to end, one spoken turn takes eight seconds: one and a half to
 recognise the speech, four and a half for the assistant to answer, two to
 synthesise the reply. The written reply appears at six seconds and the audio
-follows. That is acceptable when someone has just pressed a button and expects
+follows.
+
+That is against a database on the same machine. The deployed copy is about
+twice as slow, and the reason is worth naming: its database is hosted in
+Singapore while the service runs in Taiwan, and the round trip costs roughly a
+second on every request regardless of what is being asked. Moving the two into
+the same region is a deployment setting rather than a change to anything here,
+and it belongs with the paid database tier in the list below. That is acceptable when someone has just pressed a button and expects
 a wait, and would not be on a live telephone call. That is the honest reason a
 telephone version is a later project rather than a small addition.
 
