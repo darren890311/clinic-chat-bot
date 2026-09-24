@@ -81,7 +81,7 @@ interface, so adding a third calendar system is one new adapter and a
 configuration change, with nothing touched in the scheduler, the assistant or
 the screens.
 
-That is a demonstrated claim rather than an intention. **Two AI providers are
+That is demonstrated rather than intended. **Two AI providers are
 implemented and both work**, Anthropic's Claude and OpenAI's GPT. A test feeds
 the same conversation to both and asserts the results are identical once
 normalised, while also asserting that what each one sent over the wire differs.
@@ -222,13 +222,16 @@ The database line is the one that matters most. A free tier is right for a
 demonstration and wrong for a practice's appointment book, because a paid tier
 is what buys backups and the ability to restore to a point in time.
 
-**The bill is measured rather than estimated.** Every model call's
-tokens are added to its conversation as they are spent, and an endpoint totals
-them over a period. This is here because the question was asked during
-development and could not be answered. The counts came back on every turn, were
-displayed in the corner of the screen, and were then discarded. The only answer
-available was to count messages and multiply by a figure measured once. A
-practice asking what last month cost deserves a number rather than a range.
+**The bill is measured, not estimated.** Every conversation keeps a running
+total of the tokens it has spent, and one request returns the total for any
+period, in tokens and in money.
+
+That was added because the question came up during development and had no
+answer. The provider returns a token count with every reply, and the screen
+even shows it in the corner, but nothing was storing it. Working out what a
+week of testing had cost meant counting rows in the database and multiplying by
+a price measured once, which gives a range. A practice asking what last month
+cost should get a figure.
 
 Prices are configuration and default to unset, in which case the endpoint
 reports tokens and no money. A wrong price would be quoted; a missing one
