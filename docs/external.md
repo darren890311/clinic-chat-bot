@@ -216,7 +216,7 @@ releases itself. Nobody has to tidy up.
 ### If something looks wrong
 
 **The assistant says it cannot check availability.** A calendar service is
-unreachable. It will refuse to offer times rather than guess, which is
+unreachable, which is ours to watch rather than yours. It will refuse to offer times rather than guess, which is
 deliberate, and it recovers by itself. If it persists, tell us.
 
 **A dentist's calendar stopped being respected.** Almost always the weekly
@@ -244,13 +244,20 @@ title, not the attendees, not the notes.
 **How a patient finds an existing appointment:** by giving the name and phone
 number it was booked under. Both must match.
 
-You should know the limit of that last one. It is the same check your
-receptionist makes on the telephone, and it has the same weakness: somebody who
-knows both could see when a patient is coming in, and could cancel it. We
-recommend adding a code sent by text message before the assistant is opened to
-the general public. That work is estimated and priced in the technical document
-that accompanies this one. Until it is in place, treat the assistant as you
-would your phone line.
+You should know the limit of that last one, because it is ours to close and it
+is not closed yet. A name and a number are not secrets, so somebody who knows
+both could see when a patient is coming in and could cancel the appointment.
+
+It is the same check your receptionist makes on the telephone, and it has the
+same weakness. The difference is scale: she can be talked round once per call
+and may notice something odd about the third attempt, while a web page answers
+everyone at once and notices nothing.
+
+**Sending a one-time code to the phone number is the fix, and it is the next
+thing we are building.** Until it ships, the sensible reading is that the
+assistant is about as private as your phone line, which is to say reasonably
+private and not secret. If that is not good enough for your practice, say so
+and we will hold the public launch until the code is in place.
 
 ---
 
