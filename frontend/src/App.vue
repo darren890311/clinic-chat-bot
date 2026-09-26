@@ -81,8 +81,11 @@ const urgent = computed(() => escalationReason.value === 'urgent_symptoms')
  * ordinary sentences, not commands, so tapping one and typing one reach the
  * same place. They disappear once the conversation has started.
  */
+// Capped so the row does not become a menu. "Something else" is the way
+// past it, and a clinic with more treatments than this still books them
+// by saying so.
 const suggestions = computed(() =>
-  services.value.slice(0, 4).map((s) => `I'd like to book ${s.name.toLowerCase()}`),
+  services.value.slice(0, 5).map((s) => `I'd like to book ${s.name.toLowerCase()}`),
 )
 
 async function scroll() {
