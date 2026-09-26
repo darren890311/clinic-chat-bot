@@ -372,11 +372,17 @@ this repository is followed by deliberately breaking it.
 ### Estimating tokens by character count was 57% low
 
 The fixed prompt overhead was estimated at 1550 tokens from a
-characters-divided-by-four rule. Measured against the API it is **2437**.
+characters-divided-by-four rule. Measured against the API it was **2437**.
 
 The direction matters: the estimate understated the waste, so it understated
 what caching was worth. Cost figures in the architecture document come from
 `usage` on real responses, never from a character count.
+
+**Re-measured after the prompt and the tool set grew.** The same rule now
+estimates 3157 from 12,629 characters; the counting endpoint returns **4469**,
+split 2587 for the standing instructions and 1882 for the seven tool schemas.
+Still low, by 42% this time. The ratio is not a constant and cannot be
+corrected for, which is the reason not to use the rule at all.
 
 ### Backticks in a double-quoted commit message are executed
 
@@ -420,22 +426,32 @@ retaining the most recent versions belongs here before this runs for long.
 
 The API is stateless: each call carries the system prompt, all seven tool
 definitions, and the whole conversation so far. The first two are byte-identical
-every time and measure **2437 tokens**. A booking conversation makes roughly
-nine calls, so without caching that is about 22,000 tokens of repeated input.
+every time and measure about **4400 tokens**. A booking conversation makes
+roughly six calls, so without caching that is around 26,000 tokens of repeated
+input riding behind a patient typing "yes please".
 
-Marking it cacheable, measured on three consecutive calls:
+The figure is taken from the deployed copy rather than from a reconstruction.
+Every conversation records what it spent, and two columns confirm the size
+independently: `cache_write_tokens` records exactly one prefix write at 4307,
+and `cached_tokens` is a whole multiple of it on every row.
 
-| Call | Fresh input | Cache write | Cache read |
-|---|---|---|---|
-| 1 | 109 | 2437 | 0 |
-| 2 | 112 | 0 | 2437 |
-| 3 | 115 | 0 | 2437 |
+One real booking conversation from that table, priced at Claude Opus 5 list:
 
-For a nine-call conversation on Claude Opus 5 that is roughly $0.117 of input
-down to $0.032 — about 73% of the input cost, and 59% of the total once output
-is counted. Output is not cacheable and is the larger share at this model tier,
-which is why the headline saving is not the tenfold figure the per-token rates
-suggest.
+| | Tokens | Cost |
+|---|---|---|
+| Fresh input | 6,299 | $0.031 |
+| Output | 617 | $0.015 |
+| Read from cache | 26,412 | $0.013 |
+| **Total** | | **$0.060** |
+
+Without caching those 26,412 would have been ordinary input at ten times the
+rate, and the same conversation costs **$0.179**. So caching takes 73% off the
+input and 66% off the whole bill.
+
+An earlier version of this note said output was the larger share at this model
+tier. The recorded conversations say otherwise: output is 26% of that bill.
+Output is still the most expensive thing per token and still cannot be cached,
+but at this prompt size the repeated input dominates.
 
 The latency matters more than the money. Cached tokens are not re-read, so the
 prefill disappears from every turn after the first. On a voice call that is the
