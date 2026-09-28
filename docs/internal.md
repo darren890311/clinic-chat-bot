@@ -157,8 +157,8 @@ year and would otherwise be verified by waiting for it.
 
 ### Building it
 
-**Three and a half days, one engineer, working with an AI coding assistant.**
-That produced 7,915 lines of application code and 4,041 lines of tests. The 179
+**Four days, one engineer, working with an AI coding assistant.**
+That produced 7,925 lines of application code and 4,056 lines of tests. The 180
 tests cover the scheduling rules, the database guarantees, the isolation
 between practices, both calendar integrations, and the speech layer.
 
